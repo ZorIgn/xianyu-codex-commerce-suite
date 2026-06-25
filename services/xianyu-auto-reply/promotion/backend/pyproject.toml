@@ -1,0 +1,35 @@
+[project]
+name = "promotion-backend"
+version = "0.1.0"
+description = "推广返佣系统 - 后端服务"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "asyncmy>=0.2.9",
+    "pymysql>=1.1.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "email-validator>=2.1.0",
+    "aiohttp>=3.9.0",
+    "python-multipart>=0.0.6",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
+    "playwright",
+    "loguru>=0.7.2",
+    "httpx>=0.25.0",
+    "Pillow>=10.0.0",
+    "redis>=5.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["logs*", "static*", "__pycache__*"]

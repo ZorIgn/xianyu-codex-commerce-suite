@@ -1,0 +1,48 @@
+﻿# secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# runtime data
+data/
+logs/
+run-logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# python
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# node
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.cache/
+
+# os / ide
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# archives
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz

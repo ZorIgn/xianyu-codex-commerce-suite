@@ -1,0 +1,48 @@
+[project]
+name = "xianyu-backend-web-service"
+version = "0.1.0"
+description = "闲鱼自动回复系统 - Backend-Web服务"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "asyncmy>=0.2.9",
+    "pymysql>=1.1.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "email-validator>=2.1.0",
+    "aiohttp>=3.9.0",
+    "python-multipart>=0.0.6",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
+    "playwright",
+    "loguru>=0.7.2",
+    "httpx>=0.25.0",
+    "redis>=5.0.0",
+    "pycryptodome>=3.19.0",
+    "requests>=2.31.0",
+    "python-dateutil>=2.8.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "anyio>=4.0.0",
+    "sniffio>=1.3.0",
+    "httpcore>=1.0.0",
+    "h11>=0.14.0",
+    "click>=8.1.0",
+    "idna>=3.6",
+    "certifi>=2023.11.0",
+    "qrcode[pil]>=7.4.0",
+    "pillow>=10.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["logs*", "static*", "__pycache__*"]

@@ -1,0 +1,138 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>闲鱼卡密履约中心</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>闲鱼卡密履约中心</h1>
+      <p>CPA 导入、库存出库、人工一键激活、闲鱼发货绑定</p>
+    </div>
+    <div class="status-strip">
+      <span>合格库存 <b id="eligibleCount">0</b></span>
+      <span>已出库 <b id="shippedCount">0</b></span>
+      <span>已激活 <b id="activatedCount">0</b></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <button class="nav active" data-tab="inventory">库存</button>
+      <button class="nav" data-tab="ship">出库发货</button>
+      <button class="nav" data-tab="settings">绑定与模板</button>
+      <button class="nav" data-tab="audit">审计</button>
+    </aside>
+
+    <section class="workspace">
+      <section id="inventory" class="tab active">
+        <div class="section-head">
+          <div>
+            <h2>库存管理</h2>
+            <p>未出库库存可被自动发货；已出库库存等待人工确认“已邀请”后点击激活。</p>
+          </div>
+          <div class="filters">
+            <select id="statusFilter">
+              <option value="">全部状态</option>
+              <option value="available">未出库</option>
+              <option value="shipped">已出库待激活</option>
+              <option value="activated">已激活</option>
+              <option value="activation_failed">激活失败</option>
+            </select>
+            <input id="searchInput" placeholder="邮箱 / 订单号" />
+            <button id="refreshBtn">刷新</button>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel import-panel">
+            <h3>CPA JSON 导入</h3>
+            <textarea id="importText" spellcheck="false" placeholder="粘贴 CPA JSON。支持单个对象、数组、{items: []}、{accounts: []}"></textarea>
+            <div class="row between">
+              <label class="check"><input id="syncCockpit" type="checkbox" /> 同步到 Cockpit/aBai</label>
+              <button id="importBtn" class="primary">导入粘贴内容</button>
+            </div>
+            <div class="file-box">
+              <label>批量 JSON 文件 <input id="importFiles" type="file" accept=".json,application/json" multiple /></label>
+              <label>批量目录 <input id="importDir" type="file" accept=".json,application/json" multiple webkitdirectory /></label>
+              <button id="importFilesBtn" class="primary wide">导入选择的文件</button>
+              <small id="fileImportHint">支持一次选择很多个 CPA 单文件 JSON。</small>
+            </div>
+          </div>
+
+          <div class="panel table-panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>邮箱</th>
+                  <th>状态</th>
+                  <th>订单</th>
+                  <th>有效性</th>
+                  <th>重置</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="inventoryBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="ship" class="tab">
+        <div class="section-head"><div><h2>出库发货</h2><p>按份数读取库存，生成固定发货语句，并可发到闲鱼。</p></div></div>
+        <div class="ship-grid">
+          <div class="panel">
+            <h3>订单信息</h3>
+            <label>订单号 <input id="orderId" placeholder="闲鱼订单号" /></label>
+            <label>买家 ID / 会话 ID <input id="buyerId" placeholder="闲鱼项目识别的 buyer_id/chat_id" /></label>
+            <label>商品 ID <input id="itemId" placeholder="可选" /></label>
+            <label>份数 <input id="quantity" type="number" min="1" value="1" /></label>
+            <label>平台 <input id="platform" value="chatgpt" /></label>
+            <label class="check"><input id="sendToXianyu" type="checkbox" checked /> 调用闲鱼发送接口</label>
+            <button id="shipBtn" class="primary wide">按份数出库并发货</button>
+          </div>
+          <div class="panel"><h3>最近履约</h3><div id="fulfillmentList" class="fulfillment-list"></div></div>
+        </div>
+      </section>
+
+      <section id="settings" class="tab">
+        <div class="section-head"><div><h2>绑定与固定发货语句</h2><p>变量：{accounts}、{count}</p></div></div>
+        <div class="settings-grid">
+          <div class="panel form-panel">
+            <h3>闲鱼绑定</h3>
+            <label>闲鱼项目地址 <input id="xianyuBaseUrl" placeholder="http://127.0.0.1:8090" /></label>
+            <label>发送消息接口 <input id="xianyuEndpoint" placeholder="/internal/accounts/{account_id}/send-message" /></label>
+            <label>闲鱼账号 ID <input id="xianyuAccountId" placeholder="xianyu account_id" /></label>
+            <label>闲鱼 API Token <input id="xianyuToken" placeholder="没有可留空" /></label>
+            <h3>Cockpit / aBai</h3>
+            <label>Cockpit 地址 <input id="cockpitBaseUrl" placeholder="http://127.0.0.1:8000" /></label>
+            <label>Cockpit Token <input id="cockpitToken" /></label>
+            <h3>Codex 激活</h3>
+            <label>Codex 命令 <input id="codexCommand" placeholder="codex" /></label>
+            <label>激活提示词 <input id="codexPrompt" placeholder="你好" /></label>
+            <button id="saveSettingsBtn" class="primary wide">保存绑定</button>
+          </div>
+          <div class="panel template-panel">
+            <h3>发货模板</h3>
+            <textarea id="deliveryTemplate" spellcheck="false"></textarea>
+            <div class="row end"><button id="previewBtn">预览</button></div>
+            <pre id="templatePreview"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="audit" class="tab">
+        <div class="section-head"><div><h2>审计日志</h2><p>导入、出库、发送、激活都会留痕。</p></div><button id="auditRefreshBtn">刷新</button></div>
+        <div class="panel"><div id="auditList" class="audit-list"></div></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

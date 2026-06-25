@@ -1,0 +1,11 @@
+services:
+  mysql:
+    platform: linux/amd64
+    image: mariadb:10.11
+    ports:
+      - "127.0.0.1:13306:3306"
+  redis:
+    platform: linux/amd64
+    image: redis:7.2-bookworm
+    ports:
+      - "127.0.0.1:16379:6379"
