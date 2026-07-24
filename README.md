@@ -1,286 +1,195 @@
-﻿# 闲鱼 Codex 自动回复与库存履约中心
+<div align="center">
 
-> 纪念已经逝去的 Codex 邀请重置活动，也纪念我在闲鱼跑过的 400 多单。这个项目把当时手工处理、库存出库、买家沟通和激活复核里最容易出错的部分整理成一套可以复盘、可以继续二次开发的工程。
->
-> 起初我想直接用自己的注册机来持续供货，但真实订单量上来之后，注册产量太低，无法稳定支撑发货速度；所以这里采用「CPA JSON 批量导入 + 本地库存中心管理 + 闲鱼自动发货」作为主链路，注册机作为配套供给与后续扩展项目保留。
+# 🧾 Xianyu Codex Commerce Suite
 
-> 面向闲鱼虚拟商品交付场景的一体化项目：前端使用闲鱼自动回复/自动发货系统，后端使用本地库存履约中心管理 CPA 账号库存、订单出库、买家触发激活与审计幂等。
+**闲鱼消息、订单与本地库存履约的一体化工程**
 
-## 项目定位
+把咨询、付款识别、库存出库、自动发货、买家确认与激活审计串成可回放的履约链路。
 
-本项目把两个核心系统整合为一个可部署仓库：
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-fulfillment-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Docker-infrastructure-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-inventory-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 
-- **闲鱼自动回复前端/服务端**：负责闲鱼账号接入、咨询自动回复、订单识别、自动发货、商品与卡券绑定。
-- **本地库存履约中心**：负责 CPA JSON 批量导入、库存筛选、订单出库、Codex CLI 激活、审计日志和幂等保护。
+[核心能力](#-核心能力) · [业务架构](#️-业务架构) · [快速开始](#-快速开始) · [履约流程](#-履约流程) · [安全说明](#-安全说明)
 
-适用流程：买家咨询 → 买家付款 → 系统按订单份数自动出库 → 闲鱼发送邮箱/说明 → 买家回复固定触发词 → 后端自动激活。
+</div>
 
+---
 
-## 项目来源与二次开发
+## 📖 项目简介
 
-本仓库是一个组合交付项目，核心来自以下项目和本地二次开发：
+**Xianyu Codex Commerce Suite** 面向闲鱼虚拟商品交付场景，将闲鱼自动回复/自动发货系统与本地库存履约中心整合为一个可部署仓库。
 
-- 闲鱼自动回复与管理后台基于 [`zhinianboke/xianyu-auto-reply`](https://github.com/zhinianboke/xianyu-auto-reply) 整理改造，负责闲鱼账号接入、聊天、订单识别、商品、卡券和自动发货。
-- 本地库存履约中心为本仓库新增服务，负责 CPA JSON 导入、库存状态机、幂等出库、激活回传和审计日志。
-- 配套注册机项目：[`ZorIgn/codex-oauth-auto-register`](https://github.com/ZorIgn/codex-oauth-auto-register)，由 `aBaiAutoplus` 改造而来，加入 Codex OAuth 验证、CPA 导出、接码自动轮询和账号有效性复核相关能力。
-- 注册机原改造项目参考 [`asz798838958/aBaiAutoplus`](https://github.com/asz798838958/aBaiAutoplus)，上游注册框架参考 [`lxf746/any-auto-register`](https://github.com/lxf746/any-auto-register)。
+项目沉淀自真实订单流程：当实时注册无法稳定支撑订单峰值时，主链路改为“CPA JSON 批量导入 + 本地库存状态机 + 闲鱼自动发货”，并通过幂等 Key、审计日志和买家触发词降低重复出库、重复发货和错误激活风险。
 
-这里保留原项目的闲鱼前端能力，同时把卡券内容中的 `{DELIVERY_CONTENT}` 接到本地库存中心：买家付款后按份数扣减库存，发送邮箱与邀请说明；买家回复固定触发词后，再由本地库存中心执行 Codex CLI 激活与状态回写。
+> 💡 一句话概括：**前台负责接单和沟通，履约中心负责库存、状态与审计。**
 
-## 核心能力
+## ✨ 核心能力
 
-- 闲鱼账号登录、在线聊天、商品管理、卡券管理、订单管理。
-- Codex 邀请活动专用 AI 客服提示词，禁止砍价和无关幻觉。
-- 商品付款后自动发货，优先调用本地库存中心扣库存。
-- 支持多份订单，按真实订单数量一次性出库对应数量账号。
-- CPA JSON 批量导入，自动筛选合格账号。
-- 库存状态流转：未出库、已出库、已激活、激活失败。
-- 买家固定触发词 `全部邮箱无误 已邀请` 自动回传并激活订单。
-- 审计日志、幂等 Key、防重复出库、防重复发货。
-- 低库存预警，库存不足 5 个时页面提示。
+- 💬 **闲鱼账号与消息接入** —— 支持在线聊天、咨询分类、商品和订单管理。
+- 🤖 **约束式客服回复** —— 使用场景化提示词，限制无关回答、议价承诺和库存幻觉。
+- 📦 **自动出库** —— 付款后按真实订单份数从本地库存中心锁定合格账号。
+- 🧾 **CPA 批量导入** —— 对账号有效性、token 状态和重置次数进行基础筛选。
+- 🔄 **库存状态机** —— 管理未出库、已出库、已激活与激活失败状态。
+- ✅ **买家确认触发** —— 完整触发词回传后执行后续激活和状态回写。
+- 🛡️ **幂等与审计** —— 防止重复出库、重复发货和重复激活，并保留操作日志。
+- 🚨 **低库存预警** —— 库存低于阈值时在管理端提示。
 
-## 目录结构
-
-```text
-.
-├─ services/
-│  ├─ xianyu-auto-reply/        # 闲鱼自动回复/自动发货项目
-│  │  ├─ frontend/              # 管理后台前端
-│  │  ├─ backend-web/           # 管理后台 API
-│  │  ├─ websocket/             # 闲鱼 IM、订单、发货主服务
-│  │  ├─ scheduler/             # 定时任务服务
-│  │  ├─ common/                # 公共模型、数据库、工具函数
-│  │  └─ docker-compose*.yml    # MySQL/Redis 等基础设施
-│  └─ fulfillment-center/       # 本地库存履约中心
-│     ├─ app/                   # FastAPI 后端、库存、履约、Codex Runner
-│     ├─ tests/                 # 履约中心测试
-│     └─ requirements.txt
-├─ scripts/
-│  ├─ start-all.bat             # Windows 一键启动
-│  ├─ stop-all.bat              # 停止应用端口
-│  └─ stop-infra.bat            # 停止 Docker 基础设施
-├─ .env.example                 # 根级配置示例
-├─ .gitignore
-└─ README.md
-```
-
-## 业务流程
+## 🏗️ 业务架构
 
 ```mermaid
 flowchart LR
-    A[买家咨询] --> B[AI 客服回复活动流程]
-    B --> C[买家拍下付款]
-    C --> D[闲鱼 websocket 识别付款]
-    D --> E[调用本地库存中心出库]
-    E --> F[按份数锁定合格 CPA 账号]
-    F --> G[闲鱼发送邮箱和邀请说明]
-    G --> H[买家回复固定触发词]
-    H --> I[本地库存中心调用 Codex CLI 激活]
-    I --> J[库存状态更新为已激活]
+    B[买家咨询 / 付款] --> X[闲鱼 WebSocket 服务]
+    X --> C[受约束的客服回复]
+    X --> O[订单识别]
+    O --> F[本地履约中心]
+    J[CPA JSON 库存] --> F
+    F --> L[幂等锁定与按份出库]
+    L --> D[闲鱼自动发货]
+    D --> T[买家固定触发词]
+    T --> A[Codex CLI 激活]
+    A --> S[(状态回写 + 审计日志)]
 ```
 
-## 环境要求
+### 系统分工
 
-- Windows 10/11
+| 子系统 | 职责 |
+| --- | --- |
+| `xianyu-auto-reply` | 闲鱼账号、聊天、商品、订单、卡券和自动发货 |
+| `fulfillment-center` | CPA 导入、库存筛选、幂等出库、激活与审计 |
+| [`codex-oauth-auto-register`](https://github.com/ZorIgn/codex-oauth-auto-register) | 配套账号导入/注册、OAuth 验证、接码轮询与 CPA 导出 |
+
+## 🛠️ 技术栈
+
+| 领域 | 选型 |
+| --- | --- |
+| 管理端 | React 18、TypeScript、Vite 5、Zustand、Framer Motion、Recharts |
+| 履约 API | Python 3.11+、FastAPI、Pydantic、HTTPX |
+| 数据与状态 | SQLite、本地审计日志、幂等 Key |
+| 基础设施 | Docker Compose、MySQL、Redis |
+| 自动化 | Windows 批处理脚本、Codex CLI |
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Windows 10 / 11
 - Python 3.11+
 - Node.js 18+
 - Docker Desktop
 - Git
 - 可用的 Codex CLI
 
-> 建议所有工具和虚拟环境放在非系统盘，例如 `E:\account`，避免污染 C 盘。
-
-## 快速启动
-
-### 1. 配置环境变量
-
-复制示例文件：
+### 1. 配置
 
 ```bat
+git clone https://github.com/ZorIgn/xianyu-codex-commerce-suite.git
+cd xianyu-codex-commerce-suite
 copy .env.example .env
 ```
 
-再按自己的环境修改 `.env`。敏感信息不要提交到 Git。
+根据本地环境修改 `.env`，真实凭据不要提交到 Git。
 
 ### 2. 安装依赖
 
-首次运行闲鱼项目依赖：
-
 ```bat
 services\xianyu-auto-reply\install-all.bat
-```
 
-履约中心依赖：
-
-```bat
 cd services\fulfillment-center
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
+cd ..\..
 ```
 
-### 3. 启动 Docker Desktop
+### 3. 启动
 
-管理员权限打开 Docker Desktop，等待 Engine running。
-
-### 4. 一键启动
-
-在仓库根目录运行：
+先启动 Docker Desktop，再运行：
 
 ```bat
 scripts\start-all.bat
 ```
 
-启动后访问：
+| 服务 | 地址 |
+| --- | --- |
+| 闲鱼管理后台 | <http://127.0.0.1:9000> |
+| 本地库存中心 | <http://127.0.0.1:8765> |
+| Backend Web | <http://127.0.0.1:8089> |
+| WebSocket | <http://127.0.0.1:8090> |
+| Scheduler | <http://127.0.0.1:8091> |
 
-- 闲鱼管理后台：http://127.0.0.1:9000
-- 本地库存中心：http://127.0.0.1:8765
-- 闲鱼 backend-web：http://127.0.0.1:8089
-- 闲鱼 websocket：http://127.0.0.1:8090
-- 闲鱼 scheduler：http://127.0.0.1:8091
+## 🔄 履约流程
 
-## 前端操作说明
+1. 在管理后台绑定闲鱼账号，并保持 WebSocket 服务在线。
+2. 开启自动确认发货与自动发货。
+3. 将目标商品唯一绑定到用于交付的卡券。
+4. 在库存中心导入 CPA JSON。
+5. 买家付款后，系统按订单份数请求库存并完成出库。
+6. 系统发送邮箱与邀请说明。
+7. 买家完整回复约定触发词后，履约中心执行激活并回写状态。
 
-### 1. 绑定闲鱼账号
+### 库存筛选
 
-打开 `http://127.0.0.1:9000`，进入：
+库存中心会筛选基础合格账号：
 
-```text
-账号管理 → 新增/编辑闲鱼账号 → 按项目页面提示登录
-```
+- 未失效
+- token 未 revoked
+- 重置次数未超限
+- 未被其他订单锁定
 
-确保 websocket 服务窗口保持运行，否则无法接收闲鱼消息和订单事件。
+### 关键接口
 
-### 2. 开启自动发货
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/fulfillments/ship` | 付款后申请并锁定库存 |
+| `POST` | `/webhooks/xianyu/message` | 接收买家确认消息并触发流程 |
+| `POST` | `/fulfillments/{order_id}/activate` | 管理端手动补救激活 |
 
-进入：
-
-```text
-账号管理 → 当前闲鱼账号 → 设置
-```
-
-开启以下能力：
-
-- 自动确认发货
-- 自动发货
-- 自动补发货（如果页面存在）
-
-### 3. 商品绑定卡券
-
-进入：
-
-```text
-商品管理 → 找到商品 → 关联卡券 → 选择“邮箱”卡券 → 保存
-```
-
-本项目通过“商品 → 卡券”关系判断该商品是否走本地库存中心。商品必须唯一绑定一张用于交付的卡券。
-
-### 4. 设置卡券
-
-进入：
+## 📂 项目结构
 
 ```text
-卡券管理 → 邮箱 → 编辑
+services/
+├── xianyu-auto-reply/
+│   ├── frontend/              React 管理端
+│   ├── backend-web/           管理后台 API
+│   ├── websocket/             闲鱼 IM、订单与发货主服务
+│   ├── scheduler/             定时任务
+│   ├── common/                公共模型、数据库与工具
+│   └── docker-compose*.yml    MySQL / Redis 等基础设施
+└── fulfillment-center/
+    ├── app/                   FastAPI、库存、履约与 Codex Runner
+    └── tests/                 履约中心测试
+scripts/
+├── start-all.bat              Windows 一键启动
+├── stop-all.bat               停止应用端口
+└── stop-infra.bat             停止 Docker 基础设施
 ```
 
-建议：
-
-- 卡券类型：固定文字
-- 延时发货时间：0 或 1 秒
-- 备注信息可写：`以下是您的邮箱 {DELIVERY_CONTENT}`
-
-真实账号内容由本地库存中心返回，卡券主要承担“商品绑定发货链路”的作用。
-
-## AI 客服提示词
-
-前端 AI 回复设置里的“自定义提示词 JSON”建议使用：
-
-```json
-{
-  "classify": "你是闲鱼店铺客服，只负责识别买家意图。商品是 Codex 邀请次数服务。买家咨询价格、砍价、优惠，归类为 price；买家问怎么用、入口在哪、邀请流程、次数、有效期，归类为 tech；其他商品相关咨询归类为 default。只返回分类名，不要解释。",
-  "price": "你是闲鱼店铺客服。商品是 Codex 邀请次数服务。价格按页面为准，不议价，不主动降价，不承诺优惠。回复要简短自然。可以说明：这是 Codex 邀请次数，拍下后我会发邮箱，您在 Codex 左下角 Invite Friends / 邀请入口填写邮箱并发送，发送后回复：全部邮箱无误 已邀请。",
-  "tech": "你是闲鱼店铺客服，只回答 Codex 邀请次数的使用流程。说明：拍下付款后我会发邮箱；买家打开 Codex，在左下角找到 Invite Friends / 邀请入口，把邮箱填进去并发送邀请；发送成功后必须回复固定文字：全部邮箱无误 已邀请；我收到后会开始激活。没邀请过一般可以用 3 次；邀请发送成功即占 1 次，即使对方没回复也会占用；邀请通常可保留 30 天。不要编造其他规则。",
-  "default": "你是闲鱼店铺客服，只回复 Codex 邀请次数服务相关问题。商品说明：这是 Codex 邀请次数服务，买家拍下付款后，我会发送邮箱；买家在 Codex 左下角 Invite Friends / 邀请入口填写邮箱并发送邀请；发送成功后必须在闲鱼回复：全部邮箱无误 已邀请；收到后我会为买家激活。买家如果只说“已邀请”“邀请了”“发了”“好了”“OK”等不完整内容，必须只回复：请直接回复：全部邮箱无误 已邀请。不要砍价，不要降价，不要承诺优惠，不要编造库存、额度、到账时间、官方规则或后台状态。回复中文、简短、像真人客服，不超过 80 字。"
-}
-```
-
-议价设置建议：
-
-```text
-最大折扣：0
-最大减价：0
-最大议价轮数：0
-```
-
-## 库存中心使用说明
-
-打开 `http://127.0.0.1:8765`：
-
-1. 进入“库存”。
-2. 粘贴 CPA JSON 或批量选择 JSON 文件。
-3. 点击导入。
-4. 系统会筛选合格库存：未失效、token 未 revoked、重置次数未超限。
-5. 买家付款后，库存会自动从“未出库”变为“已出库”。
-6. 买家完整回复 `全部邮箱无误 已邀请` 后，系统自动激活对应订单库存。
-
-## 本地接口
-
-### 出库接口
-
-```http
-POST /fulfillments/ship
-```
-
-用于闲鱼 websocket 付款后申请库存。
-
-### 买家消息回传
-
-```http
-POST /webhooks/xianyu/message
-```
-
-买家回复固定触发词后自动激活订单。
-
-### 手动激活
-
-```http
-POST /fulfillments/{order_id}/activate
-```
-
-用于后台人工补救。
-
-## 安全说明
-
-本仓库默认不提交：
-
-- `.env`
-- 数据库文件
-- 库存数据
-- 日志
-- 虚拟环境
-- Docker/Node/Python 缓存
-- API Key、Cookie、Token
-
-上传 GitHub 前请再次检查：
-
-```bat
-git status --short
-git diff --cached
-```
-
-## 停止服务
-
-停止应用端口：
+## 🛑 停止服务
 
 ```bat
 scripts\stop-all.bat
-```
-
-停止 MySQL/Redis：
-
-```bat
 scripts\stop-infra.bat
 ```
 
-## 许可证
+## 🛡️ 安全说明
 
-本项目包含对上游开源项目的集成与二次开发。使用、分发和商用前请确认各上游项目许可证要求。
+本仓库默认不应提交：
+
+- `.env`、API Key、Cookie、Token
+- 数据库、库存文件和账号 JSON
+- 日志、虚拟环境和运行缓存
+- Docker、Node 和 Python 构建产物
+
+对外部署前还应补充鉴权、权限分级、敏感字段加密、速率限制和审计日志留存策略。本项目包含第三方开源项目的集成与二次开发，使用、分发和商用前请逐项确认上游许可证与目标平台服务条款。
+
+## 🙏 项目来源
+
+- 闲鱼系统基于 [`zhinianboke/xianyu-auto-reply`](https://github.com/zhinianboke/xianyu-auto-reply) 整理改造。
+- 本地库存履约中心为本仓库新增服务。
+- 账号供给侧工具见 [`ZorIgn/codex-oauth-auto-register`](https://github.com/ZorIgn/codex-oauth-auto-register)。
+
+## ⚠️ 免责声明
+
+本项目用于学习、研究和本地自动化流程复盘。请遵守闲鱼、Codex 及相关第三方服务的条款和当地法律法规，不要用于虚假交易、垃圾消息、滥用账号或未经授权的访问。
