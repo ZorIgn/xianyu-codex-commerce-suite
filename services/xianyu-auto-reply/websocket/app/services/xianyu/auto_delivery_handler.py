@@ -11,6 +11,7 @@
 
 import asyncio
 import json
+import os
 import time
 import hashlib
 import aiohttp
@@ -820,6 +821,13 @@ class AutoDeliveryHandler:
 
         return True
 
+    def _local_fulfillment_enabled(self, item_id: str) -> bool:
+        try:
+            from app.services.fulfillment_center_client import is_item_enabled
+            return bool(is_item_enabled(str(item_id or "")))
+        except Exception:
+            return False
+
     def mark_delivery_sent(self, order_id: str):
         """标记订单已发货"""
         current_time = time.time()
@@ -934,8 +942,8 @@ class AutoDeliveryHandler:
                 return
 
             # 第二重检查：基于时间的冷却机制
-            if not self.can_auto_delivery(order_id):
-                logger.info(f'[{msg_time}] 【{self.cookie_id}】订单 {order_id} 在冷却期内，跳过发货')
+            if not self._local_fulfillment_enabled(item_id) and not self.can_auto_delivery(order_id):
+                logger.info(f"[{msg_time}] order {order_id} is in cooldown; skip delivery")
                 return
 
             # 使用Redis分布式锁（跨进程并发控制，Redis失败时降级为仅本地锁）
@@ -965,10 +973,26 @@ class AutoDeliveryHandler:
                         from common.db.compat import db_manager
                         existing_order = db_manager.get_order_by_id(order_id)
                         if existing_order and existing_order.get('status') == 'shipped':
-                            logger.info(f'[{msg_time}] 【{self.cookie_id}】获取锁后检查发现订单 {order_id} 已发货，跳过处理')
-                            return
+                            try:
+                                from app.services.fulfillment_center_client import is_item_enabled
+                                if not is_item_enabled(str(item_id or '')):
+                                    logger.info(
+                                        f'[{msg_time}] order {order_id} is already shipped; '
+                                        'skip because local fulfillment is not enabled for this item'
+                                    )
+                                    return
+                                logger.info(
+                                    f'[{msg_time}] order {order_id} is already shipped, '
+                                    'but explicit local fulfillment may need a quantity top-up; continue'
+                                )
+                            except Exception:
+                                logger.info(
+                                    f'[{msg_time}] order {order_id} is already shipped; '
+                                    'skip because local fulfillment flag could not be verified'
+                                )
+                                return
                     except Exception as e:
-                        logger.warning(f'[{msg_time}] 【{self.cookie_id}】获取锁后检查订单状态异常: {self._safe_str(e)}')
+                        logger.warning(f'[{msg_time}] failed to inspect shipped order state: {self._safe_str(e)}')
 
                 # 第三重检查：获取锁后再次检查延迟锁状态（双重检查，防止在等待锁期间状态发生变化）
                 if self.is_lock_held(lock_key):
@@ -976,8 +1000,8 @@ class AutoDeliveryHandler:
                     return
 
                 # 第四重检查：获取锁后再次检查冷却状态
-                if not self.can_auto_delivery(order_id):
-                    logger.info(f'[{msg_time}] 【{self.cookie_id}】订单 {order_id} 在获取锁后检查发现仍在冷却期，跳过发货')
+                if not self._local_fulfillment_enabled(item_id) and not self.can_auto_delivery(order_id):
+                    logger.info(f"[{msg_time}] order {order_id} is in cooldown; skip delivery")
                     return
 
                 # 构造用户URL
@@ -992,45 +1016,59 @@ class AutoDeliveryHandler:
 
                     logger.info(f"【{self.cookie_id}】准备自动发货: item_id={item_id}, item_title={item_title}")
 
-                    # 检查是否需要多数量发货
+                    # 检查是否需要多数量发货。订单付款事件和订单详情同步是并行的，
+                    # 首次读取到 1 不代表买家只买了 1 份；只对开启多数量的商品做很短的有界重试。
                     from common.db.compat import db_manager
-                    quantity_to_send = 1  # 默认发送1个
+                    quantity_to_send = 1
+                    multi_quantity_delivery = db_manager.get_item_multi_quantity_delivery_status(
+                        self.cookie_id, item_id
+                    )
+                    quantity_attempts = max(1, int(os.getenv("FULFILLMENT_QUANTITY_RETRIES", "3")))
+                    quantity_retry_delay = max(
+                        0.05,
+                        float(os.getenv("FULFILLMENT_QUANTITY_RETRY_DELAY", "0.25")),
+                    )
+                    if order_id and multi_quantity_delivery:
+                        for quantity_attempt in range(quantity_attempts):
+                            try:
+                                existing_order = db_manager.get_order_by_id(order_id) if order_id else None
+                                cached_quantity = int((existing_order or {}).get('quantity') or 1)
+                                if cached_quantity > quantity_to_send:
+                                    quantity_to_send = cached_quantity
+                                    logger.info(
+                                        f"[fulfillment-center] quantity from local order cache: {quantity_to_send}"
+                                    )
 
-                    # 检查商品是否开启了多数量发货
-                    multi_quantity_delivery = db_manager.get_item_multi_quantity_delivery_status(self.cookie_id, item_id)
-                    try:
-                        existing_order = db_manager.get_order_by_id(order_id) if order_id else None
-                        existing_quantity = int((existing_order or {}).get('quantity') or 1)
-                        if existing_quantity > 1:
-                            quantity_to_send = existing_quantity
-                            logger.info(f"[fulfillment-center] quantity from local order cache: {quantity_to_send}")
-                    except Exception as quantity_cache_exc:
-                        logger.warning(f"[fulfillment-center] local quantity cache check failed: {self._safe_str(quantity_cache_exc)}")
-
-                    if order_id:
-                        logger.info(f"商品 {item_id} 开启了多数量发货，获取订单详情...")
-                        try:
-                            # 使用现有方法获取订单详情
-                            order_detail = await self.fetch_order_detail_info(order_id, item_id, send_user_id)
-                            if order_detail and order_detail.get('quantity'):
-                                try:
+                                order_detail = await self.fetch_order_detail_info(
+                                    order_id, item_id, send_user_id
+                                )
+                                if order_detail and order_detail.get('quantity'):
                                     order_quantity = int(order_detail['quantity'])
-                                    if order_quantity > 1:
+                                    if order_quantity > quantity_to_send:
                                         quantity_to_send = order_quantity
-                                        logger.info(f"从订单详情获取数量: {order_quantity}，将发送 {quantity_to_send} 个卡券")
-                                    else:
-                                        logger.info(f"订单数量为 {order_quantity}，发送单个卡券")
-                                except (ValueError, TypeError):
-                                    logger.warning(f"订单数量格式无效: {order_detail.get('quantity')}，发送单个卡券")
-                            else:
-                                logger.info(f"未获取到订单数量信息，发送单个卡券")
-                        except Exception as e:
-                            logger.error(f"获取订单详情失败: {self._safe_str(e)}，发送单个卡券")
+                                        logger.info(
+                                            f"从订单详情获取数量: {order_quantity}，将发送 {quantity_to_send} 个卡券"
+                                        )
+                                if quantity_to_send > 1:
+                                    break
+                            except (ValueError, TypeError) as exc:
+                                logger.warning(
+                                    f"订单数量格式无效或读取失败（第 {quantity_attempt + 1}/{quantity_attempts} 次）：{self._safe_str(exc)}"
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    f"获取订单数量失败（第 {quantity_attempt + 1}/{quantity_attempts} 次）：{self._safe_str(exc)}"
+                                )
+                            if quantity_attempt + 1 < quantity_attempts:
+                                await asyncio.sleep(quantity_retry_delay)
+                        if quantity_to_send == 1:
+                            logger.info(
+                                f"未在有界重试窗口内读到多数量，按 1 张即时发货；后续重复事件可通过履约中心幂等补齐"
+                            )
                     elif not multi_quantity_delivery:
                         logger.info(f"商品 {item_id} 未开启多数量发货，发送单个卡券")
                     else:
                         logger.info(f"无订单ID，发送单个卡券")
-
                     # card_only 多数量退化保护：订单已被关闭 + 仅补发卡券是商家"礼貌性安抚"语义，
                     # 业务上就是补 1 张固定卡券；多数量场景下 N 倍补发会让货主额外亏 N-1 张卡密成本
                     # （特别是 data/api 实际卡密会扣库存/调 API），强制退化为 1 张。
@@ -1043,6 +1081,9 @@ class AutoDeliveryHandler:
 
                     # 多次调用自动发货方法，每次获取不同的内容
                     delivery_contents = []
+                    local_fulfillment_queued = False
+                    local_fulfillment_quantity = 0
+                    quantity_needs_reconcile = quantity_to_send > 1
                     success_count = 0
                     order_already_shipped = False  # 标记订单是否已发货
                     # 对接卡券退化标记：多数量循环里若第 1 张匹配到对接卡券，强制 break 退化为 1 张
@@ -1056,14 +1097,14 @@ class AutoDeliveryHandler:
                     self._last_delivery_card_source = None
                     self._last_delivery_card_type = None
 
-                    # Fulfillment center bulk handoff. If enabled, ship the whole order
-                    # once with the order quantity, then skip the built-in card loop.
-                    # It is only allowed when this product is bound to exactly one card,
-                    # preserving the Xianyu product -> card binding as the trigger.
+                    # The local fulfillment center is an explicit product opt-in.
+                    # Card relation count is not a hidden routing switch.
                     try:
-                        bound_cards = db_manager.get_cards_by_item_id(item_id)
-                        if len(bound_cards or []) == 1:
-                            from app.services.fulfillment_center_client import try_ship_from_fulfillment_center
+                        from app.services.fulfillment_center_client import (
+                            is_item_enabled,
+                            try_ship_from_fulfillment_center,
+                        )
+                        if is_item_enabled(str(item_id or '')):
                             fc_result = await try_ship_from_fulfillment_center(
                                 order_no=str(order_id or ''),
                                 buyer_id=str(send_user_id or ''),
@@ -1074,14 +1115,14 @@ class AutoDeliveryHandler:
                                 account_id=str(self.cookie_id or ''),
                             )
                         else:
-                            fc_result = {'handled': False}
+                            fc_result = {'handled': False, 'reason': 'item_not_opted_in'}
                             logger.info(
-                                f"[fulfillment-center] skip local inventory because product-card binding is not unique: "
-                                f"item_id={item_id}, cards={len(bound_cards or [])}"
+                                f"[fulfillment-center] skip local inventory because item is not explicitly enabled: item_id={item_id}"
                             )
                         if fc_result.get('handled'):
                             if fc_result.get('success'):
-                                delivery_contents.append(fc_result.get('delivery_text') or '')
+                                local_fulfillment_queued = True
+                                local_fulfillment_quantity = quantity_to_send
                                 success_count = quantity_to_send
                                 self._last_delivery_card_source = 'own'
                                 self._last_delivery_card_type = 'fulfillment_center'
@@ -1100,6 +1141,41 @@ class AutoDeliveryHandler:
                         self._last_delivery_fail_reason = f"fulfillment center error: {fc_exc}"
                         logger.error(f"[fulfillment-center] order shipment exception: {self._safe_str(fc_exc)}")
                         quantity_to_send = 0
+
+                    if local_fulfillment_queued:
+                        self.mark_delivery_sent(order_id)
+                        if quantity_needs_reconcile:
+                            try:
+                                from app.services.fulfillment_center_client import reconcile_fulfillment_quantity
+                                reconcile_result = await reconcile_fulfillment_quantity(
+                                    str(order_id or ""), local_fulfillment_quantity
+                                )
+                                if not reconcile_result.get("success"):
+                                    logger.warning(
+                                        f"[fulfillment-center] quantity reconcile was not confirmed: "
+                                        f"order_id={order_id}, quantity={local_fulfillment_quantity}"
+                                    )
+                            except Exception as reconcile_exc:
+                                logger.warning(
+                                    f"[fulfillment-center] quantity reconcile failed: "
+                                    f"order_id={order_id}, error={self._safe_str(reconcile_exc)}"
+                                )
+                        await self._record_delivery_log(
+                            chat_id=chat_id,
+                            item_id=item_id,
+                            sender_user_id=send_user_id,
+                            sender_user_name=send_user_name,
+                            msg_time=msg_time,
+                            order_id=order_id,
+                            delivery_contents=["[fulfillment-center queued]"],
+                            send_results=[{"success": True, "mode": "fulfillment_queue", "content": "queued"}],
+                            any_send_failed=False,
+                        )
+                        logger.info(
+                            f"[fulfillment-center] order accepted by durable queue; "
+                            f"handler will not send delivery_text: order_id={order_id}"
+                        )
+                        return
 
                     for i in range(quantity_to_send):
                         try:

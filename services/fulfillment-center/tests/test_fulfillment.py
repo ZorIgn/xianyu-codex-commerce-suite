@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 
 from fastapi.testclient import TestClient
@@ -49,7 +50,13 @@ class FulfillmentFlowTest(unittest.TestCase):
             json={"order_id": "xy-1", "inventory_id": inventory_id},
         )
         self.assertEqual(activated.status_code, 200)
-        self.assertEqual(activated.json()["status"], "partially_activated")
+
+        deadline = time.monotonic() + 3
+        fulfillment = activated.json()
+        while fulfillment["status"] != "partially_activated" and time.monotonic() < deadline:
+            time.sleep(0.05)
+            fulfillment = self.client.get("/fulfillments/xy-1").json()
+        self.assertEqual(fulfillment["status"], "partially_activated")
 
         summary = self.client.get("/inventory/summary").json()
         self.assertEqual(summary["by_status"].get("activated"), 1)

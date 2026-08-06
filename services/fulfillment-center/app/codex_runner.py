@@ -15,7 +15,7 @@ from .config import get_settings
 from .settings_store import get_setting
 
 
-ABAI_PROJECT = Path(r"E:\account\aBaiAutoplus_syunnrai")
+ABAI_PROJECT = get_settings().abai_project_root
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
