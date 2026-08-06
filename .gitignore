@@ -46,3 +46,7 @@ Thumbs.db
 *.rar
 *.tar
 *.gz
+
+# local browser/captcha runtime trails
+**/human_trails/
+**/@AutomationLog.txt

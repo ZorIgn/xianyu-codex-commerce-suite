@@ -7,7 +7,7 @@
 3. 启动本项目：
 
 ```powershell
-cd E:\account\xianyu-codex-fulfillment
+cd <repo>/services/fulfillment-center
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
@@ -48,16 +48,21 @@ Content-Type: application/json
   "order_id": "xy_order_10001",
   "buyer_id": "buyer_abc",
   "item_id": "item_123",
-  "platform": "chatgpt"
+  "chat_id": "chat_abc",
+  "account_id": "xianyu-account-1",
+  "platform": "chatgpt",
+  "quantity": 1
 }
 ```
 
 本项目会：
 
-- 创建履约单。
-- 抢占合格库存。
-- 生成账号交付文本。
-- 调用 `XIANYU_BASE_URL/api/messages/send` 回复买家。
+- 把付款事件写入 durable delivery queue。
+- 由 delivery worker 原子抢占合格库存。
+- 生成账号交付文本并调用闲鱼内部发送接口。
+- 将发送状态回写为 `account_sent` 或 `send_pending`。
+
+订单详情同步发现数量增加时，调用 `POST /delivery/jobs/{order_id}/reconcile`；即使订单已标记 `shipped`，也会继续补齐未分配库存。
 
 ## 4. 买家“已邀请”消息事件
 
@@ -84,9 +89,9 @@ Content-Type: application/json
 ```env
 DRY_RUN=false
 COCKPIT_BASE_URL=http://127.0.0.1:8000
-XIANYU_BASE_URL=http://127.0.0.1:8080
+XIANYU_BASE_URL=http://127.0.0.1:8090
 CODEX_COMMAND=codex
 ```
 
-如果 `xianyu-auto-reply` 实际发送消息接口不是 `/api/messages/send`，只需要改 `app/adapters.py` 的 `XianyuAdapter.send_message`。
+闲鱼发送接口由 `XIANYU_SEND_ENDPOINT` 设置控制；HTTP 200 但响应 `success=false` 或错误 `code` 会进入 durable outbox 重试。
 

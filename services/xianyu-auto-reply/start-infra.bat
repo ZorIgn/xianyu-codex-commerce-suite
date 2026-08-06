@@ -1,6 +1,6 @@
 @echo off
 set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%PATH%"
-set "DOCKER_CONFIG=E:\account\.docker-codex"
+set "DOCKER_CONFIG=%USERPROFILE%\.docker-codex"
 set ROOT=%~dp0
 cd /d "%ROOT%"
 docker version >nul 2>nul
