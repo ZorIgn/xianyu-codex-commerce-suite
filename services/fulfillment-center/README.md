@@ -1,126 +1,48 @@
-﻿# 闲鱼卡密履约中心
+# 闲鱼 Codex 履约中心
 
-这是一个本地一体式卡密/账号库存管理中心，用来配合 `xianyu-auto-reply` 做咨询回复、订单出库、固定语句发货，以及人工一键 Codex 激活。
+本服务负责库存导入、订单幂等出库、持久化发货队列、闲鱼内部消息发送、桌面激活队列和 OAuth 批量刷新。
 
 ## 启动
 
-```powershell
-cd E:\account\xianyu-codex-fulfillment
+在仓库根目录运行：
+
+~~~powershell
+cd services/fulfillment-center
 python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
-```
+~~~
 
-也可以双击：
+需要桌面激活时，先按部署环境配置桌面实例池，再运行：
 
-```text
-E:\account\xianyu-codex-fulfillment\start-backend.bat
-```
+~~~powershell
+./start-desktop-bridge.ps1
+~~~
 
-前端管理后台和后端是同一个服务，打开：
+## 付款链路
 
-```text
-http://127.0.0.1:8765/
-```
+闲鱼 websocket 调用 /webhooks/xianyu/order-paid，并传入 order_id、buyer_id、item_id、chat_id、account_id、quantity。付款接口只入队；worker 负责出库并通过闲鱼内部 /internal/accounts/{account_id}/send-message 发送。
 
-## 业务流程
+## 关键接口
 
-1. 在“绑定与模板”里填写闲鱼项目地址、发送接口、Cockpit/aBai 地址、Codex 命令。
-2. 在“绑定与模板”里编辑固定发货语句，使用 `{accounts}` 放账号内容，`{count}` 放份数。
-3. 在“库存”里粘贴 CPA JSON 导入库存。需要同步到 aBai/Cockpit 时勾选“同步到 Cockpit/aBai”。
-4. 买家咨询仍由 `xianyu-auto-reply` 前端处理。
-5. 买家拍下付款后，闲鱼项目回调 `/webhooks/xianyu/order-paid`，或者人工在“出库发货”页输入订单号、买家 ID、份数并点击出库。
-6. 系统按份数读取本地合格库存，状态改为“已出库待激活”，生成固定发货语句，并调用闲鱼发送接口。
-7. 人工确认买家回复“已邀请”后，到“库存”里筛选“已出库待激活”，点击对应库存的“一键激活”。
-8. 激活会读取该库存 CPA JSON 中的 `session_token/cookies`，复用 aBai 的 Codex 切号逻辑，然后运行 `codex exec 你好`。
+- POST /webhooks/xianyu/order-paid：付款入队
+- GET /delivery/jobs/{order_id}：发货任务状态
+- POST /delivery/jobs/{order_id}/reconcile：补齐订单数量
+- GET /fulfillments/{order_id}：履约和库存状态
+- POST /oauth/refresh-batches：创建批量凭证刷新
+- DELETE /oauth/refresh-batches/{batch_id}：取消未执行任务
+- POST /oauth/refresh-batches/{batch_id}/retry-failed：重试失败项
 
-## 合格库存规则
+## 配置
 
-出库前必须满足：
+请复制 .env.example 为 .env，并使用部署机器上的通用占位路径填写 OAuth 和桌面实例配置。不要提交 .env、数据库、日志或任何凭证。
 
-- 状态是 `available`。
-- `validity_status != invalid`。
-- `lifecycle_status` 不在 `invalid/expired/revoked/disabled/used/consumed`。
-- `display_status` 不在 `invalid/expired/revoked/disabled`。
-- `token_revoked` 为 false。
-- `reset_count <= MAX_RESET_COUNT`，默认 0。
-- 至少有邮箱密码，或 token/session/cookies。
+闲鱼 websocket 的商品路由配置位于 services/xianyu-auto-reply/websocket/.env：
 
-## 正式模式
+~~~env
+FULFILLMENT_CENTER_ENABLED=true
+FULFILLMENT_CENTER_URL=http://127.0.0.1:8765
+FULFILLMENT_CENTER_ITEM_IDS=item-id-1,item-id-2
+FULFILLMENT_CENTER_ALL_ITEMS=false
+~~~
 
-`.env.example` 是模板。正式运行时复制为 `.env`：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-然后设置：
-
-```env
-DRY_RUN=false
-XIANYU_BASE_URL=http://127.0.0.1:你的闲鱼项目端口
-CODEX_COMMAND=codex
-```
-
-`DRY_RUN=true` 时不会真实发送闲鱼消息，也不会真实切换 Codex 账号，适合检查界面和模板。
-
-## 闲鱼项目需要回调的接口
-
-已付款自动发货：
-
-```http
-POST http://127.0.0.1:8765/webhooks/xianyu/order-paid
-Idempotency-Key: xianyu-order-paid-{order_id}
-Content-Type: application/json
-
-{
-  "order_id": "闲鱼订单号",
-  "buyer_id": "闲鱼会话或买家ID",
-  "item_id": "商品ID",
-  "quantity": 1,
-  "platform": "chatgpt"
-}
-```
-
-买家消息只做留痕，不自动激活：
-
-```http
-POST http://127.0.0.1:8765/webhooks/xianyu/message
-Content-Type: application/json
-
-{
-  "order_id": "闲鱼订单号",
-  "buyer_id": "闲鱼会话或买家ID",
-  "text": "已邀请"
-}
-```
-
-## 闲鱼发送接口适配
-
-默认调用：
-
-```text
-{XIANYU_BASE_URL}/api/messages/send
-```
-
-请求体：
-
-```json
-{
-  "buyer_id": "buyer id",
-  "order_id": "order id",
-  "text": "发货文本"
-}
-```
-
-如果 `xianyu-auto-reply` 实际接口不同，打开后台“绑定与模板”修改发送消息接口；如果请求体字段不同，改 `app/adapters.py` 的 `XianyuAdapter.send_message`。
-
-## API 速查
-
-- `GET /`：管理前端。
-- `POST /inventory/import-cpa`：CPA JSON 导入。
-- `GET /inventory`：库存列表。
-- `GET /inventory/summary`：库存统计。
-- `POST /fulfillments/ship`：人工或上游出库发货。
-- `POST /fulfillments/activate-item`：一键激活某个已出库库存。
-- `GET /fulfillments/{order_id}`：订单履约详情。
-- `GET /audit`：审计日志。
+完整改造说明见 docs/2026-08-06-high-concurrency.md。

@@ -5,13 +5,13 @@
 本地源码目录：
 
 ```text
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main
+<repo>/services/xianyu-auto-reply
 ```
 
 主前端目录：
 
 ```text
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\frontend
+<repo>/services/xianyu-auto-reply\frontend
 ```
 
 主要服务：
@@ -28,36 +28,38 @@ E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\frontend
 新增文件：
 
 ```text
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket\app\services\fulfillment_center_client.py
+<repo>/services/xianyu-auto-reply\websocket\app\services\fulfillment_center_client.py
 ```
 
 已修改：
 
 ```text
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket\app\api\routes\internal.py
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket\.env.example
+<repo>/services/xianyu-auto-reply\websocket\app\api\routes\internal.py
+<repo>/services/xianyu-auto-reply\websocket\.env.example
 ```
 
-接入点是闲鱼项目自己的内部发货接口：
+付款事件通过闲鱼 websocket 的订单处理逻辑进入本地履约中心：
 
 ```http
-POST /internal/orders/deliver
+POST /webhooks/xianyu/order-paid
 ```
 
-当 `FULFILLMENT_CENTER_ENABLED=true` 时，这个接口会优先调用本地履约中心：
+请求必须包含 `order_id`、`item_id`、`buyer_id`、真实 `chat_id`、闲鱼 `account_id` 和当前已知 `quantity`。履约中心只负责把事件写入 durable delivery queue；本地 delivery worker 负责库存分配和调用闲鱼内部发送接口，闲鱼 handler 不再重复发送 `delivery_text`。
+
+订单详情同步发现数量增加时，调用：
 
 ```http
-POST http://127.0.0.1:8765/fulfillments/ship
+POST /delivery/jobs/{order_id}/reconcile
 ```
 
-履约中心按订单份数扣本地库存，返回发货语句；闲鱼 websocket 服务再把这段发货语句发送给买家，并把订单标记为已发货。
+补齐逻辑不受订单已标记 `shipped` 的限制。
 
 ## 闲鱼项目怎么绑定履约中心
 
 编辑：
 
 ```text
-E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket\.env
+<repo>/services/xianyu-auto-reply\websocket\.env
 ```
 
 如果没有 `.env`，从 `.env.example` 复制一份。
@@ -67,18 +69,21 @@ E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket\.env
 ```env
 FULFILLMENT_CENTER_ENABLED=true
 FULFILLMENT_CENTER_URL=http://127.0.0.1:8765
-FULFILLMENT_CENTER_TIMEOUT=30
+FULFILLMENT_CENTER_ITEM_IDS=replace-with-item-id
+FULFILLMENT_CENTER_ALL_ITEMS=false
+FULFILLMENT_CENTER_TIMEOUT=5
 ```
 
 开启后，闲鱼项目的发货流程会变成：
 
 ```text
-买家付款/后台点发货
--> websocket /internal/orders/deliver
--> 本地履约中心按 quantity 出库
--> 返回 delivery_text
--> 闲鱼 websocket 发消息给买家
--> 闲鱼订单更新为已发货
+买家付款
+-> websocket POST /webhooks/xianyu/order-paid
+-> 履约中心 durable delivery queue
+-> delivery worker 按 quantity 分配库存
+-> worker 调用闲鱼内部发送接口
+-> fulfillment 回写 account_sent / send_pending
+-> 订单详情同步后按需 POST /delivery/jobs/{order_id}/reconcile
 -> 本地库存变成“已出库待激活”
 ```
 
@@ -105,7 +110,7 @@ http://127.0.0.1:8765/
 1. 启动履约中心：
 
 ```powershell
-cd E:\account\xianyu-codex-fulfillment
+cd <repo>/services/fulfillment-center
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
@@ -114,24 +119,24 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 在源码目录下分别启动：
 
 ```powershell
-cd E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\backend-web
+cd <repo>/services/xianyu-auto-reply\backend-web
 python main.py
 ```
 
 ```powershell
-cd E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\websocket
+cd <repo>/services/xianyu-auto-reply\websocket
 python main.py
 ```
 
 ```powershell
-cd E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\scheduler
+cd <repo>/services/xianyu-auto-reply\scheduler
 python main.py
 ```
 
 3. 启动闲鱼前端：
 
 ```powershell
-cd E:\account\xianyu-auto-reply-main-src\xianyu-auto-reply-main\frontend
+cd <repo>/services/xianyu-auto-reply\frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 9000
 ```
