@@ -1371,6 +1371,8 @@ class XianyuAsync:
                         logger.error(f"[fulfillment-center] buyer-message webhook failed: status={resp.status}, body={body[:300]}")
                         return
             reply_text = str(data.get("reply_text") or "").strip()
+            if reply_text and not reply_text.startswith("[自动回复]"):
+                reply_text = f"[自动回复] {reply_text}"
             if reply_text and chat_id and buyer_id:
                 await self.send_msg(websocket, chat_id, buyer_id, reply_text)
             logger.info(f"[fulfillment-center] buyer-message webhook handled: order_id={order_id}, data_keys={list(data.keys())}")
