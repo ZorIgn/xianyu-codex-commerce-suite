@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -10,12 +10,14 @@
   <header class="topbar">
     <div>
       <h1>闲鱼卡密履约中心</h1>
-      <p>CPA 导入、库存出库、人工一键激活、闲鱼发货绑定</p>
+      <p>CPA 导入、库存出库、单实例排队激活、闲鱼发货绑定</p>
     </div>
     <div class="status-strip">
       <span>合格库存 <b id="eligibleCount">0</b></span>
       <span>已出库 <b id="shippedCount">0</b></span>
       <span>已激活 <b id="activatedCount">0</b></span>
+      <span>激活队列 <b id="queueCount">0</b></span>
+      <span id="workerStatus">Worker 检查中</span>
     </div>
   </header>
 
@@ -23,6 +25,7 @@
     <aside class="sidebar">
       <button class="nav active" data-tab="inventory">库存</button>
       <button class="nav" data-tab="ship">出库发货</button>
+      <button class="nav" data-tab="queue">激活队列</button>
       <button class="nav" data-tab="settings">绑定与模板</button>
       <button class="nav" data-tab="audit">审计</button>
     </aside>
@@ -32,25 +35,32 @@
         <div class="section-head">
           <div>
             <h2>库存管理</h2>
-            <p>未出库库存可被自动发货；已出库库存等待人工确认“已邀请”后点击激活。</p>
+            <p>每个账号都可以手动加入激活队列；队列只复用绑定的一个 Cockpit 桌面实例。重新授权会直接使用库存密码运行本地 Cockpit OAuth；如果账号要求验证码，系统会提示验证失败。</p>
           </div>
           <div class="filters">
             <select id="statusFilter">
               <option value="">全部状态</option>
               <option value="available">未出库</option>
               <option value="shipped">已出库待激活</option>
+              <option value="activating">激活中</option>
               <option value="activated">已激活</option>
               <option value="activation_failed">激活失败</option>
             </select>
             <input id="searchInput" placeholder="邮箱 / 订单号" />
             <button id="refreshBtn">刷新</button>
           </div>
+          <div class="bulk-toolbar">
+            <label class="check"><input id="selectAllInventory" type="checkbox" /> 全选当前筛选结果</label>
+            <button id="refreshSelectedOauthBtn">更新选中凭证</button>
+            <button id="refreshAllOauthBtn" class="primary">一键更新全部凭证</button>
+          </div>
+          <div id="oauthBatchStatus" class="oauth-batch-status"></div>
         </div>
 
         <div class="split">
           <div class="panel import-panel">
             <h3>CPA JSON 导入</h3>
-            <textarea id="importText" spellcheck="false" placeholder="粘贴 CPA JSON。支持单个对象、数组、{items: []}、{accounts: []}"></textarea>
+            <textarea id="importText" spellcheck="false" placeholder="粘贴 CPA JSON。支持说明文字后连续多个对象、数组、{items: []}、{accounts: []}"></textarea>
             <div class="row between">
               <label class="check"><input id="syncCockpit" type="checkbox" /> 同步到 Cockpit/aBai</label>
               <button id="importBtn" class="primary">导入粘贴内容</button>
@@ -66,15 +76,7 @@
           <div class="panel table-panel">
             <table>
               <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>邮箱</th>
-                  <th>状态</th>
-                  <th>订单</th>
-                  <th>有效性</th>
-                  <th>重置</th>
-                  <th>操作</th>
-                </tr>
+                <tr><th><input id="selectAllInventoryHeader" type="checkbox" aria-label="全选" /></th><th>ID</th><th>邮箱</th><th>状态</th><th>订单</th><th>有效性</th><th>重置</th><th>操作</th></tr>
               </thead>
               <tbody id="inventoryBody"></tbody>
             </table>
@@ -83,7 +85,9 @@
       </section>
 
       <section id="ship" class="tab">
-        <div class="section-head"><div><h2>出库发货</h2><p>按份数读取库存，生成固定发货语句，并可发到闲鱼。</p></div></div>
+        <div class="section-head">
+          <div><h2>出库发货</h2><p>按份数读取库存，生成固定发货语句，并可发到闲鱼。</p></div>
+        </div>
         <div class="ship-grid">
           <div class="panel">
             <h3>订单信息</h3>
@@ -99,8 +103,22 @@
         </div>
       </section>
 
+      <section id="queue" class="tab">
+        <div class="section-head">
+          <div>
+            <h2>激活队列</h2>
+            <p>可以取消尚未开始的任务；正在切号、发送或等待回复的任务不可取消。</p>
+          </div>
+          <button id="queueRefreshBtn">刷新队列</button>
+        </div>
+        <div class="panel">
+          <div class="queue-note">取消任务只会移出激活队列，不会把已经交付给买家的库存自动回库。</div>
+          <div id="activationQueue" class="fulfillment-list"></div>
+        </div>
+      </section>
+
       <section id="settings" class="tab">
-        <div class="section-head"><div><h2>绑定与固定发货语句</h2><p>变量：{accounts}、{count}</p></div></div>
+        <div class="section-head"><div><h2>绑定与固定发货语句</h2><p>桌面激活只使用一个 Cockpit 实例，不要填写临时 PID。</p></div></div>
         <div class="settings-grid">
           <div class="panel form-panel">
             <h3>闲鱼绑定</h3>
@@ -108,12 +126,22 @@
             <label>发送消息接口 <input id="xianyuEndpoint" placeholder="/internal/accounts/{account_id}/send-message" /></label>
             <label>闲鱼账号 ID <input id="xianyuAccountId" placeholder="xianyu account_id" /></label>
             <label>闲鱼 API Token <input id="xianyuToken" placeholder="没有可留空" /></label>
-            <h3>Cockpit / aBai</h3>
-            <label>Cockpit 地址 <input id="cockpitBaseUrl" placeholder="http://127.0.0.1:8000" /></label>
-            <label>Cockpit Token <input id="cockpitToken" /></label>
+            <h3>固定桌面激活实例</h3>
+            <label>激活提供方 <select id="activationProvider"><option value="desktop">ChatGPT/Codex 桌面端</option><option value="cli">Codex CLI 回退</option></select></label>
+            <label>实例名称 <input id="desktopInstanceName" placeholder="例如 copy" /></label>
+            <label>实例 ID <input id="desktopInstanceId" placeholder="Cockpit instance UUID" /></label>
+            <label>CODEX_HOME <input id="desktopProfileDir" placeholder="Cockpit 实例目录" /></label>
+            <label>桌面 App 数据目录（Cockpit 实例） <input id="desktopAppUserDataDir" placeholder="必须绑定已完成初始化的 codex-app-data 目录" /></label>
+            <label>启动命令（可选） <input id="desktopLaunchCommand" placeholder="留空则使用 Cockpit 配置" /></label>
+            <label>激活 Worker 数量 <input id="activationWorkerCount" type="number" min="1" max="16" value="3" /></label>
+            <label>桌面实例池 JSON <textarea id="desktopInstancePool" spellcheck="false" placeholder='[{"name":"worker-1","instance_id":"...","codex_home":"E:\\...","app_user_data_dir":"E:\\..."}]'></textarea></label>
+            <label class="check"><input id="desktopBackgroundMode" type="checkbox" /> 后台最小化启动桌面端</label>
+            <label class="check"><input id="desktopAllowForegroundFallback" type="checkbox" /> UI Automation 失败时允许前台 fallback（会抢焦点）</label>
+            <div class="row between"><span id="desktopInstanceStatus">实例状态检查中</span><button id="testDesktopBtn">检测实例</button></div>
             <h3>Codex 激活</h3>
-            <label>Codex 命令 <input id="codexCommand" placeholder="codex" /></label>
-            <label>激活提示词 <input id="codexPrompt" placeholder="你好" /></label>
+            <label>桌面激活消息 <input id="codexPrompt" value="你好" readonly /></label>
+            <label class="check"><input id="reauthBeforeActivation" type="checkbox" /> 每个库存激活前强制重新授权</label>
+            <small>打开后，任务轮到某个库存时先使用库存密码跑一次本地 OAuth，成功后才发送“你好”。</small>
             <button id="saveSettingsBtn" class="primary wide">保存绑定</button>
           </div>
           <div class="panel template-panel">
@@ -126,12 +154,12 @@
       </section>
 
       <section id="audit" class="tab">
-        <div class="section-head"><div><h2>审计日志</h2><p>导入、出库、发送、激活都会留痕。</p></div><button id="auditRefreshBtn">刷新</button></div>
+        <div class="section-head"><div><h2>审计日志</h2><p>导入、出库、发送、排队、激活都会留痕。</p></div><button id="auditRefreshBtn">刷新</button></div>
         <div class="panel"><div id="auditList" class="audit-list"></div></div>
       </section>
     </section>
   </main>
-
+  <input id="oauthImportInput" type="file" accept=".json,application/json" hidden />
   <div id="toast" class="toast"></div>
   <script src="/static/app.js"></script>
 </body>

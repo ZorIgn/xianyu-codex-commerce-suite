@@ -1,10 +1,10 @@
 /**
- * 涓汉璁剧疆椤甸潰
+ * 个人设置页面
  * 
- * 鍔熻兘锛?
- * 1. 鏄剧ず鍜岀紪杈戜釜浜轰綑棰?
- * 2. 淇敼鐧诲綍瀵嗙爜
- * 3. 鍚庣画鍙墿灞曟洿澶氫釜浜鸿缃」
+ * 功能：
+ * 1. 显示和编辑个人余额
+ * 2. 修改登录密码
+ * 3. 后续可扩展更多个人设置项
  */
 import { useState, useEffect, useRef } from 'react'
 import { User, RefreshCw, Wallet, Plus, Key, Link2, Copy, RotateCcw, Save, Package, X, ScrollText, ArrowUpFromLine, Upload, QrCode, Eye, EyeOff } from 'lucide-react'
@@ -17,14 +17,14 @@ import { ConfirmModal } from '@/components/common/ConfirmModal'
 import { RechargeModal } from './RechargeModal'
 import { FundFlowModal } from './FundFlowModal'
 
-// 浣欓璁剧疆鐨?key
+// 余额设置的 key
 const BALANCE_KEY = 'balance'
 const CONTACT_WECHAT_KEY = 'contact_wechat'
 const CONTACT_QQ_KEY = 'contact_qq'
 const REDELIVERY_TRIGGER_KEYWORD_KEY = 'redelivery_trigger_keyword'
 const PAYMENT_QRCODE_KEY = 'payment_qrcode'
 const PAYMENT_TYPE_KEY = 'payment_type'
-// 瀵规帴鍗″瘑绉橀挜鐨?key锛堟寜鐢ㄦ埛瀛樺偍锛岀敤浜庛€屽垎閿€鍗″埜銆嶉〉闈㈠鎺ヤ笂娓稿崱鍒哥郴缁燂級
+// 对接卡密秘钥的 key（按用户存储，用于「分销卡券」页面对接上游卡券系统）
 const CARD_SECRET_KEY = 'distribution.card_secret_key'
 
 export function PersonalSettings() {
@@ -44,48 +44,48 @@ export function PersonalSettings() {
   const [withdrawing, setWithdrawing] = useState(false)
   const [showWithdrawModal, setShowWithdrawModal] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
-  const [withdrawMinAmount, setWithdrawMinAmount] = useState('')  // 鏈€浣庢彁鐜伴噾棰?
-  // 鏀舵鐮佺姸鎬?
+  const [withdrawMinAmount, setWithdrawMinAmount] = useState('')  // 最低提现金额
+  // 收款码状态
   const [showQrcodeModal, setShowQrcodeModal] = useState(false)
   const [paymentQrcode, setPaymentQrcode] = useState('')
   const [paymentType, setPaymentType] = useState<'alipay' | 'wechat'>('alipay')
   const [uploadingQrcode, setUploadingQrcode] = useState(false)
   const qrcodeFileRef = useRef<HTMLInputElement>(null)
 
-  // 瀵规帴鐮佺姸鎬?
+  // 对接码状态
   const [dockCode, setDockCode] = useState('')
   const [dockCodeLoading, setDockCodeLoading] = useState(false)
   const [resettingDockCode, setResettingDockCode] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
 
-  // 鍒嗛攢绉橀挜鐘舵€?
+  // 分销秘钥状态
   const [secretKey, setSecretKey] = useState('')
   const [secretKeyLoading, setSecretKeyLoading] = useState(false)
   const [resettingSecretKey, setResettingSecretKey] = useState(false)
   const [secretKeyResetConfirmOpen, setSecretKeyResetConfirmOpen] = useState(false)
 
-  // 瀵规帴鍗″瘑绉橀挜鐘舵€侊紙鐢ㄤ簬鍒嗛攢鍗″埜瀵规帴涓婃父绯荤粺锛?
+  // 对接卡密秘钥状态（用于分销卡券对接上游系统）
   const [cardSecretKey, setCardSecretKey] = useState('')
   const [savingCardSecretKey, setSavingCardSecretKey] = useState(false)
   const [creatingCardSecretKey, setCreatingCardSecretKey] = useState(false)
   const [showCardSecretKey, setShowCardSecretKey] = useState(false)
 
-  // 鑱旂郴鏂瑰紡鐘舵€?
+  // 联系方式状态
   const [contactWechat, setContactWechat] = useState('')
   const [contactQQ, setContactQQ] = useState('')
   const [savingContact, setSavingContact] = useState(false)
 
-  // 閲嶅彂璐цЕ鍙戝叧閿瓧鐘舵€?
+  // 重发货触发关键字状态
   const [redeliveryKeyword, setRedeliveryKeyword] = useState('')
   const [savingRedeliveryKeyword, setSavingRedeliveryKeyword] = useState(false)
 
-  // 瀵嗙爜淇敼鐘舵€?
+  // 密码修改状态
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [changingPassword, setChangingPassword] = useState(false)
 
-  // 鍔犺浇涓汉璁剧疆
+  // 加载个人设置
   const loadSettings = async () => {
     if (!_hasHydrated || !isAuthenticated || !token) return
     try {
@@ -104,12 +104,12 @@ export function PersonalSettings() {
       if (typeResult.success && typeResult.value) {
         setPaymentType(typeResult.value as 'alipay' | 'wechat')
       }
-      // 鍔犺浇閲嶅彂璐цЕ鍙戝叧閿瓧
+      // 加载重发货触发关键字
       const redeliveryResult = await getUserSetting(REDELIVERY_TRIGGER_KEYWORD_KEY)
       if (redeliveryResult.success && redeliveryResult.value !== undefined) {
         setRedeliveryKeyword(redeliveryResult.value)
       }
-      // 鍔犺浇鑱旂郴鏂瑰紡
+      // 加载联系方式
       const wechatResult = await getUserSetting(CONTACT_WECHAT_KEY)
       if (wechatResult.success && wechatResult.value !== undefined) {
         setContactWechat(wechatResult.value)
@@ -118,7 +118,7 @@ export function PersonalSettings() {
       if (qqResult.success && qqResult.value !== undefined) {
         setContactQQ(qqResult.value)
       }
-      // 鍔犺浇瀵规帴鍗″瘑绉橀挜
+      // 加载对接卡密秘钥
       const cardKeyResult = await getUserSetting(CARD_SECRET_KEY)
       if (cardKeyResult.success && cardKeyResult.value !== undefined) {
         setCardSecretKey(cardKeyResult.value)
@@ -130,7 +130,7 @@ export function PersonalSettings() {
     }
   }
 
-  // 鍔犺浇瀵规帴鐮?
+  // 加载对接码
   const loadDockCode = async () => {
     try {
       setDockCodeLoading(true)
@@ -139,42 +139,42 @@ export function PersonalSettings() {
         setDockCode(result.dock_code)
       }
     } catch {
-      // 闈欓粯澶辫触
+      // 静默失败
     } finally {
       setDockCodeLoading(false)
     }
   }
 
-  // 閲嶇疆瀵规帴鐮?
+  // 重置对接码
   const handleResetDockCode = async () => {
     try {
       setResettingDockCode(true)
       const result = await resetDockCode()
       if (result.success) {
-        addToast({ type: 'success', message: '瀵规帴鐮佸凡閲嶇疆' })
+        addToast({ type: 'success', message: '对接码已重置' })
         await loadDockCode()
       } else {
-        addToast({ type: 'error', message: result.message || '閲嶇疆澶辫触' })
+        addToast({ type: 'error', message: result.message || '重置失败' })
       }
     } catch {
-      addToast({ type: 'error', message: '閲嶇疆瀵规帴鐮佸け璐? })
+      addToast({ type: 'error', message: '重置对接码失败' })
     } finally {
       setResettingDockCode(false)
       setResetConfirmOpen(false)
     }
   }
 
-  // 澶嶅埗瀵规帴鐮?
+  // 复制对接码
   const handleCopyDockCode = () => {
     if (!dockCode) return
     navigator.clipboard.writeText(dockCode).then(() => {
-      addToast({ type: 'success', message: '瀵规帴鐮佸凡澶嶅埗鍒板壀璐存澘' })
+      addToast({ type: 'success', message: '对接码已复制到剪贴板' })
     }).catch(() => {
-      addToast({ type: 'error', message: '澶嶅埗澶辫触锛岃鎵嬪姩澶嶅埗' })
+      addToast({ type: 'error', message: '复制失败，请手动复制' })
     })
   }
 
-  // 鍔犺浇鍒嗛攢绉橀挜
+  // 加载分销秘钥
   const loadSecretKey = async () => {
     try {
       setSecretKeyLoading(true)
@@ -183,67 +183,67 @@ export function PersonalSettings() {
         setSecretKey(result.secret_key)
       }
     } catch {
-      // 闈欓粯澶辫触
+      // 静默失败
     } finally {
       setSecretKeyLoading(false)
     }
   }
 
-  // 鏇存崲鍒嗛攢绉橀挜
+  // 更换分销秘钥
   const handleResetSecretKey = async () => {
     try {
       setResettingSecretKey(true)
       const result = await resetSecretKey()
       if (result.success) {
-        addToast({ type: 'success', message: '鍒嗛攢绉橀挜宸叉洿鎹? })
+        addToast({ type: 'success', message: '分销秘钥已更换' })
         if (result.data?.secret_key) {
           setSecretKey(result.data.secret_key)
         } else {
           await loadSecretKey()
         }
       } else {
-        addToast({ type: 'error', message: result.message || '鏇存崲澶辫触' })
+        addToast({ type: 'error', message: result.message || '更换失败' })
       }
     } catch {
-      addToast({ type: 'error', message: '鏇存崲鍒嗛攢绉橀挜澶辫触' })
+      addToast({ type: 'error', message: '更换分销秘钥失败' })
     } finally {
       setResettingSecretKey(false)
       setSecretKeyResetConfirmOpen(false)
     }
   }
 
-  // 澶嶅埗鍒嗛攢绉橀挜
+  // 复制分销秘钥
   const handleCopySecretKey = () => {
     if (!secretKey) return
     navigator.clipboard.writeText(secretKey).then(() => {
-      addToast({ type: 'success', message: '鍒嗛攢绉橀挜宸插鍒跺埌鍓创鏉? })
+      addToast({ type: 'success', message: '分销秘钥已复制到剪贴板' })
     }).catch(() => {
-      addToast({ type: 'error', message: '澶嶅埗澶辫触锛岃鎵嬪姩澶嶅埗' })
+      addToast({ type: 'error', message: '复制失败，请手动复制' })
     })
   }
 
-  // 淇濆瓨瀵规帴鍗″瘑绉橀挜
+  // 保存对接卡密秘钥
   const handleSaveCardSecretKey = async () => {
     try {
       setSavingCardSecretKey(true)
-      const result = await updateUserSetting(CARD_SECRET_KEY, cardSecretKey.trim(), '瀵规帴鍗″瘑绉橀挜')
+      const result = await updateUserSetting(CARD_SECRET_KEY, cardSecretKey.trim(), '对接卡密秘钥')
       if (result.success) {
-        addToast({ type: 'success', message: '瀵规帴鍗″瘑绉橀挜宸蹭繚瀛? })
+        addToast({ type: 'success', message: '对接卡密秘钥已保存' })
       } else {
-        addToast({ type: 'error', message: result.message || '淇濆瓨澶辫触' })
+        addToast({ type: 'error', message: result.message || '保存失败' })
       }
     } catch {
-      addToast({ type: 'error', message: '淇濆瓨瀵规帴鍗″瘑绉橀挜澶辫触' })
+      addToast({ type: 'error', message: '保存对接卡密秘钥失败' })
     } finally {
       setSavingCardSecretKey(false)
     }
   }
 
-  // 涓€閿垱寤哄鎺ュ崱瀵嗙閽ワ細璋冪敤澶栭儴瀵嗛挜鏈嶅姟鍒涘缓骞惰嚜鍔ㄤ繚瀛樺埌褰撳墠鐢ㄦ埛
+  // 一键创建对接卡密秘钥：调用外部密钥服务创建并自动保存到当前用户
   const handleCreateCardSecretKey = async () => {
-    // 宸插瓨鍦ㄥ垯绂佹鍒涘缓锛屾彁绀鸿仈绯荤鐞嗗憳閲嶇疆
+    // 已存在则禁止创建，提示联系管理员重置
     if (cardSecretKey.trim()) {
-      addToast({ type: 'warning', message: '瀵规帴鍗″瘑绉橀挜宸插瓨鍦紝濡傞渶閲嶆柊鍒涘缓璇疯仈绯荤鐞嗗憳閲嶇疆' })
+      addToast({ type: 'warning', message: '对接卡密秘钥已存在，如需重新创建请联系管理员重置' })
       return
     }
     try {
@@ -251,9 +251,9 @@ export function PersonalSettings() {
       const result = await createCardSecretKey()
       if (result.success && result.data?.key_value) {
         setCardSecretKey(result.data.key_value)
-        addToast({ type: 'success', message: result.message || '瀵规帴鍗″瘑绉橀挜鍒涘缓鎴愬姛' })
+        addToast({ type: 'success', message: result.message || '对接卡密秘钥创建成功' })
       } else {
-        addToast({ type: 'error', message: result.message || '鍒涘缓澶辫触' })
+        addToast({ type: 'error', message: result.message || '创建失败' })
       }
     } finally {
       setCreatingCardSecretKey(false)
@@ -272,11 +272,11 @@ export function PersonalSettings() {
         setSettlementTotalPages(result.data.total_pages)
       } else {
         setSettlementRecords([])
-        addToast({ type: 'error', message: result.message || '鍔犺浇缁撶畻璁板綍澶辫触' })
+        addToast({ type: 'error', message: result.message || '加载结算记录失败' })
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '鍔犺浇缁撶畻璁板綍澶辫触'
+      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '加载结算记录失败'
       addToast({ type: 'error', message: errorMsg })
       setSettlementRecords([])
     } finally {
@@ -290,22 +290,22 @@ export function PersonalSettings() {
     loadSecretKey()
   }, [_hasHydrated, isAuthenticated, token])
 
-  // 淇濆瓨閲嶅彂璐цЕ鍙戝叧閿瓧
+  // 保存重发货触发关键字
   const handleSaveRedeliveryKeyword = async () => {
     try {
       setSavingRedeliveryKeyword(true)
       const trimmed = redeliveryKeyword.trim()
-      await updateUserSetting(REDELIVERY_TRIGGER_KEYWORD_KEY, trimmed, '閲嶅彂璐цЕ鍙戝叧閿瓧')
+      await updateUserSetting(REDELIVERY_TRIGGER_KEYWORD_KEY, trimmed, '重发货触发关键字')
       setRedeliveryKeyword(trimmed)
-      addToast({ type: 'success', message: '閲嶅彂璐цЕ鍙戝叧閿瓧淇濆瓨鎴愬姛' })
+      addToast({ type: 'success', message: '重发货触发关键字保存成功' })
     } catch {
-      addToast({ type: 'error', message: '淇濆瓨澶辫触' })
+      addToast({ type: 'error', message: '保存失败' })
     } finally {
       setSavingRedeliveryKeyword(false)
     }
   }
 
-  // 涓婁紶鏀舵鐮?
+  // 上传收款码
   const handleUploadQrcode = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -315,12 +315,12 @@ export function PersonalSettings() {
       if (result.success && result.data?.image_url) {
         setPaymentQrcode(result.data.image_url)
         setShowQrcodeModal(false)
-        addToast({ type: 'success', message: '鏀舵鐮佷笂浼犳垚鍔? })
+        addToast({ type: 'success', message: '收款码上传成功' })
       } else {
-        addToast({ type: 'error', message: result.message || '涓婁紶澶辫触' })
+        addToast({ type: 'error', message: result.message || '上传失败' })
       }
     } catch {
-      addToast({ type: 'error', message: '涓婁紶澶辫触' })
+      addToast({ type: 'error', message: '上传失败' })
     } finally {
       setUploadingQrcode(false)
       e.target.value = ''
@@ -329,34 +329,34 @@ export function PersonalSettings() {
 
   const handleWithdraw = async () => {
     if (!paymentQrcode) {
-      addToast({ type: 'warning', message: '璇峰厛涓婁紶鏀舵鐮? })
+      addToast({ type: 'warning', message: '请先上传收款码' })
       return
     }
 
     if (!withdrawAmount.trim()) {
-      addToast({ type: 'warning', message: '璇疯緭鍏ユ彁鐜伴噾棰? })
+      addToast({ type: 'warning', message: '请输入提现金额' })
       return
     }
 
     const currentBalance = Number(balance || '0')
     const amountValue = Number(withdrawAmount.trim())
 
-    // 鏍￠獙鏈€浣庢彁鐜伴噾棰?
+    // 校验最低提现金额
     if (withdrawMinAmount) {
       const minAmt = Number(withdrawMinAmount)
       if (minAmt > 0 && amountValue < minAmt) {
-        addToast({ type: 'warning', message: `鎻愮幇閲戦涓嶈兘浣庝簬鏈€浣庢彁鐜伴噾棰?楼${minAmt}` })
+        addToast({ type: 'warning', message: `提现金额不能低于最低提现金额 ¥${minAmt}` })
         return
       }
     }
 
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
-      addToast({ type: 'warning', message: '鎻愮幇閲戦蹇呴』澶т簬0' })
+      addToast({ type: 'warning', message: '提现金额必须大于0' })
       return
     }
 
     if (amountValue > currentBalance) {
-      addToast({ type: 'warning', message: '鎻愮幇閲戦涓嶈兘澶т簬褰撳墠浣欓' })
+      addToast({ type: 'warning', message: '提现金额不能大于当前余额' })
       return
     }
 
@@ -372,15 +372,15 @@ export function PersonalSettings() {
         }
         setWithdrawAmount('')
         setShowWithdrawModal(false)
-        addToast({ type: 'success', message: result.message || '鎻愮幇鐢宠宸叉彁浜わ紝绛夊緟瀹℃牳' })
+        addToast({ type: 'success', message: result.message || '提现申请已提交，等待审核' })
         await loadSettlementRecords(1, settlementPageSize)
         setShowSettlementModal(true)
       } else {
-        addToast({ type: 'error', message: result.message || '鎻愮幇鐢宠澶辫触' })
+        addToast({ type: 'error', message: result.message || '提现申请失败' })
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '鎻愮幇鐢宠澶辫触'
+      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '提现申请失败'
       addToast({ type: 'error', message: errorMsg })
     } finally {
       setWithdrawing(false)
@@ -392,57 +392,57 @@ export function PersonalSettings() {
     await loadSettlementRecords(1, settlementPageSize)
   }
 
-  // 淇濆瓨鑱旂郴鏂瑰紡
+  // 保存联系方式
   const handleSaveContact = async () => {
     try {
       setSavingContact(true)
-      await updateUserSetting(CONTACT_WECHAT_KEY, contactWechat, '寰俊鑱旂郴鏂瑰紡')
-      await updateUserSetting(CONTACT_QQ_KEY, contactQQ, 'QQ鑱旂郴鏂瑰紡')
-      addToast({ type: 'success', message: '鑱旂郴鏂瑰紡淇濆瓨鎴愬姛' })
+      await updateUserSetting(CONTACT_WECHAT_KEY, contactWechat, '微信联系方式')
+      await updateUserSetting(CONTACT_QQ_KEY, contactQQ, 'QQ联系方式')
+      addToast({ type: 'success', message: '联系方式保存成功' })
     } catch {
-      addToast({ type: 'error', message: '淇濆瓨鑱旂郴鏂瑰紡澶辫触' })
+      addToast({ type: 'error', message: '保存联系方式失败' })
     } finally {
       setSavingContact(false)
     }
   }
 
-  // 淇敼瀵嗙爜
+  // 修改密码
   const handleChangePassword = async () => {
     if (!currentPassword) {
-      addToast({ type: 'warning', message: '璇疯緭鍏ュ綋鍓嶅瘑鐮? })
+      addToast({ type: 'warning', message: '请输入当前密码' })
       return
     }
     if (!newPassword) {
-      addToast({ type: 'warning', message: '璇疯緭鍏ユ柊瀵嗙爜' })
+      addToast({ type: 'warning', message: '请输入新密码' })
       return
     }
     if (newPassword !== confirmPassword) {
-      addToast({ type: 'warning', message: '涓ゆ杈撳叆鐨勫瘑鐮佷笉涓€鑷? })
+      addToast({ type: 'warning', message: '两次输入的密码不一致' })
       return
     }
     if (newPassword.length < 6) {
-      addToast({ type: 'warning', message: '鏂板瘑鐮侀暱搴︿笉鑳藉皯浜?浣? })
+      addToast({ type: 'warning', message: '新密码长度不能少于6位' })
       return
     }
     try {
       setChangingPassword(true)
       const result = await changePassword({ current_password: currentPassword, new_password: newPassword })
       if (result.success) {
-        addToast({ type: 'success', message: '瀵嗙爜淇敼鎴愬姛锛屽嵆灏嗛€€鍑虹櫥褰? })
+        addToast({ type: 'success', message: '密码修改成功，即将退出登录' })
         setCurrentPassword('')
         setNewPassword('')
         setConfirmPassword('')
-        // 寤惰繜1绉掑悗閫€鍑虹櫥褰?
+        // 延迟1秒后退出登录
         setTimeout(() => {
           clearAuth()
           window.location.href = '/login'
         }, 1000)
       } else {
-        addToast({ type: 'error', message: result.message || '瀵嗙爜淇敼澶辫触' })
+        addToast({ type: 'error', message: result.message || '密码修改失败' })
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '瀵嗙爜淇敼澶辫触'
+      const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || '密码修改失败'
       addToast({ type: 'error', message: errorMsg })
     } finally {
       setChangingPassword(false)
@@ -455,30 +455,30 @@ export function PersonalSettings() {
 
   return (
     <div className="space-y-4">
-      {/* 椤靛ご */}
+      {/* 页头 */}
       <div className="page-header flex-between flex-wrap gap-4">
         <div>
-          <h1 className="page-title">涓汉璁剧疆</h1>
-          <p className="page-description">绠＄悊涓汉璐︽埛淇℃伅鍜屽亸濂借缃?/p>
+          <h1 className="page-title">个人设置</h1>
+          <p className="page-description">管理个人账户信息和偏好设置</p>
         </div>
         <button onClick={loadSettings} className="btn-ios-secondary">
           <RefreshCw className="w-4 h-4" />
-          鍒锋柊
+          刷新
         </button>
       </div>
 
-      {/* 璐︽埛淇℃伅 */}
+      {/* 账户信息 */}
       <div className="vben-card">
         <div className="vben-card-header">
           <h2 className="vben-card-title">
             <User className="w-4 h-4" />
-            璐︽埛淇℃伅
+            账户信息
           </h2>
         </div>
         <div className="vben-card-body space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="input-label">鐢ㄦ埛鍚?/label>
+              <label className="input-label">用户名</label>
               <input
                 type="text"
                 value={user?.username || ''}
@@ -487,10 +487,10 @@ export function PersonalSettings() {
               />
             </div>
             <div>
-              <label className="input-label">瑙掕壊</label>
+              <label className="input-label">角色</label>
               <input
                 type="text"
-                value={user?.is_admin ? '绠＄悊鍛? : '鏅€氱敤鎴?}
+                value={user?.is_admin ? '管理员' : '普通用户'}
                 disabled
                 className="input-ios bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
               />
@@ -499,12 +499,12 @@ export function PersonalSettings() {
         </div>
       </div>
 
-      {/* 浣欓绠＄悊 */}
+      {/* 余额管理 */}
       <div className="vben-card">
         <div className="vben-card-header flex items-center justify-between">
           <h2 className="vben-card-title">
             <Wallet className="w-4 h-4" />
-            浣欓绠＄悊
+            余额管理
           </h2>
           <div className="flex items-center gap-2">
             <button
@@ -512,28 +512,28 @@ export function PersonalSettings() {
               className="btn-ios-secondary text-sm"
             >
               <Wallet className="w-4 h-4" />
-              璧勯噾娴佹按
+              资金流水
             </button>
             <button
               onClick={() => setShowQrcodeModal(true)}
               className="btn-ios-secondary text-sm"
             >
               <QrCode className="w-4 h-4" />
-              鏀舵鐮佺鐞?
+              收款码管理
             </button>
             <button
               onClick={async () => {
                 if (!paymentQrcode) {
-                  addToast({ type: 'warning', message: '璇峰厛涓婁紶鏀舵鐮? })
+                  addToast({ type: 'warning', message: '请先上传收款码' })
                   return
                 }
-                // 鑾峰彇鏈€浣庢彁鐜伴噾棰?
+                // 获取最低提现金额
                 try {
                   const sysResult = await getSystemSettings()
                   if (sysResult.success && sysResult.data) {
                     setWithdrawMinAmount(sysResult.data['withdraw.min_amount'] || '')
                   }
-                } catch { /* 鑾峰彇澶辫触涓嶉樆鏂祦绋?*/ }
+                } catch { /* 获取失败不阻断流程 */ }
                 setWithdrawAmount('')
                 setShowWithdrawModal(true)
               }}
@@ -541,67 +541,67 @@ export function PersonalSettings() {
               className="btn-ios-secondary text-sm"
             >
               {withdrawing ? <ButtonLoading /> : <ArrowUpFromLine className="w-4 h-4" />}
-              鎻愮幇
+              提现
             </button>
             <button
               onClick={openSettlementModal}
               className="btn-ios-secondary text-sm"
             >
               <ScrollText className="w-4 h-4" />
-              缁撶畻璁板綍
+              结算记录
             </button>
             <button
               onClick={() => setShowRecharge(true)}
               className="btn-ios-primary text-sm"
             >
               <Plus className="w-4 h-4" />
-              浣欓鍏呭€?
+              余额充值
             </button>
           </div>
         </div>
         <div className="vben-card-body space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="input-label">褰撳墠浣欓锛堝厓锛?/label>
+              <label className="input-label">当前余额（元）</label>
               <div className="text-2xl font-semibold text-amber-600 dark:text-amber-400">
-                楼{balance || '0.00'}
+                ¥{balance || '0.00'}
               </div>
-              <p className="text-xs text-gray-500 mt-1">鐐瑰嚮"浣欓鍏呭€?鎸夐挳鍙€氳繃鏀粯瀹濇壂鐮佸厖鍊?/p>
+              <p className="text-xs text-gray-500 mt-1">点击"余额充值"按钮可通过支付宝扫码充值</p>
             </div>
             <div>
-              <label className="input-label">鏀舵鐮?/label>
+              <label className="input-label">收款码</label>
               {paymentQrcode ? (
                 <div className="flex items-center gap-2">
                   <img
                     src={paymentQrcode.startsWith('http') ? paymentQrcode : paymentQrcode}
-                    alt="鏀舵鐮?
+                    alt="收款码"
                     className="w-16 h-16 rounded-lg border border-slate-200 dark:border-slate-700 object-contain"
                   />
-                  <span className="text-xs text-slate-500">{paymentType === 'wechat' ? '寰俊' : '鏀粯瀹?}鏀舵鐮?/span>
+                  <span className="text-xs text-slate-500">{paymentType === 'wechat' ? '微信' : '支付宝'}收款码</span>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500 dark:text-slate-400">鏈笂浼狅紝鐐瑰嚮銆屾敹娆剧爜绠＄悊銆嶄笂浼?/div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">未上传，点击「收款码管理」上传</div>
               )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 鍒嗛攢绠＄悊 */}
+      {/* 分销管理 */}
       <div className="vben-card">
         <div className="vben-card-header">
           <h2 className="vben-card-title">
             <Link2 className="w-4 h-4" />
-            鍒嗛攢绠＄悊
+            分销管理
           </h2>
         </div>
         <div className="vben-card-body space-y-4">
           <div>
-            <label className="input-label">瀵规帴鐮?/label>
-            <p className="text-xs text-gray-500 mb-2">瀵规帴鐮佺敤浜庡垎閿€鍟嗚瘑鍒偍鐨勮韩浠斤紝鍒嗕韩缁欎笅绾у垎閿€鍟嗗嵆鍙鎺ユ偍鐨勫崱鍒?/p>
+            <label className="input-label">对接码</label>
+            <p className="text-xs text-gray-500 mb-2">对接码用于分销商识别您的身份，分享给下级分销商即可对接您的卡券</p>
             <div className="flex items-center gap-3">
               {dockCodeLoading ? (
-                <div className="text-sm text-gray-400">鍔犺浇涓?..</div>
+                <div className="text-sm text-gray-400">加载中...</div>
               ) : (
                 <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 font-mono text-lg tracking-widest font-semibold text-gray-900 dark:text-white select-all">
                   {dockCode || '-'}
@@ -611,30 +611,30 @@ export function PersonalSettings() {
                 onClick={handleCopyDockCode}
                 disabled={!dockCode}
                 className="btn-ios-secondary text-sm"
-                title="澶嶅埗瀵规帴鐮?
+                title="复制对接码"
               >
                 <Copy className="w-4 h-4" />
-                澶嶅埗
+                复制
               </button>
               <button
                 onClick={() => setResetConfirmOpen(true)}
                 disabled={resettingDockCode}
                 className="btn-ios-secondary text-sm text-amber-600 dark:text-amber-400"
-                title="閲嶇疆瀵规帴鐮?
+                title="重置对接码"
               >
                 <RotateCcw className={`w-4 h-4 ${resettingDockCode ? 'animate-spin' : ''}`} />
-                閲嶇疆
+                重置
               </button>
             </div>
           </div>
 
-          {/* 绉橀挜璁剧疆 */}
+          {/* 秘钥设置 */}
           <div>
-            <label className="input-label">绉橀挜</label>
-            <p className="text-xs text-gray-500 mb-2">鍒嗛攢绉橀挜涓?2浣嶉殢鏈哄瓧绗︼紝鍏ㄥ眬鍞竴锛岀敤浜庡垎閿€鎺ュ彛鐨勮韩浠芥牎楠屻€傝濡ュ杽淇濈锛屽彲闅忔椂鏇存崲銆?/p>
+            <label className="input-label">秘钥</label>
+            <p className="text-xs text-gray-500 mb-2">分销秘钥为32位随机字符，全局唯一，用于分销接口的身份校验。请妥善保管，可随时更换。</p>
             <div className="flex items-center gap-3 flex-wrap">
               {secretKeyLoading ? (
-                <div className="text-sm text-gray-400">鍔犺浇涓?..</div>
+                <div className="text-sm text-gray-400">加载中...</div>
               ) : (
                 <div className="flex items-center px-4 py-2.5 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 font-mono text-sm tracking-wider font-semibold text-gray-900 dark:text-white break-all select-all">
                   {secretKey || '-'}
@@ -644,36 +644,36 @@ export function PersonalSettings() {
                 onClick={handleCopySecretKey}
                 disabled={!secretKey}
                 className="btn-ios-secondary text-sm"
-                title="澶嶅埗绉橀挜"
+                title="复制秘钥"
               >
                 <Copy className="w-4 h-4" />
-                澶嶅埗
+                复制
               </button>
               <button
                 onClick={() => setSecretKeyResetConfirmOpen(true)}
                 disabled={resettingSecretKey}
                 className="btn-ios-secondary text-sm text-amber-600 dark:text-amber-400"
-                title="鏇存崲绉橀挜"
+                title="更换秘钥"
               >
                 <RotateCcw className={`w-4 h-4 ${resettingSecretKey ? 'animate-spin' : ''}`} />
-                鏇存崲
+                更换
               </button>
             </div>
           </div>
 
-          {/* 瀵规帴鍗″瘑绉橀挜璁剧疆 */}
+          {/* 对接卡密秘钥设置 */}
           <div>
-            <label className="input-label">瀵规帴鍗″瘑绉橀挜</label>
-            <p className="text-xs text-gray-500 mb-2">鐢ㄤ簬銆屽垎閿€鍗″埜銆嶉〉闈㈠鎺ヤ笂娓稿崱鍒哥郴缁熺殑閴存潈绉橀挜锛岃濡ュ杽淇濈銆備慨鏀瑰悗鐐瑰嚮銆屼繚瀛樸€嶇敓鏁堛€?/p>
-            <p className="text-xs text-gray-500 mb-2">绉橀挜璧勯噾娴佹按鍜屼綑棰濆厖鍊硷紝璇疯繘鍏?<a className="text-xs text-blue-600 dark:text-blue-400 mb-2" href="http://agent.zhinianboke.com" target='_BLANK'>agent.zhinianboke.com</a> 涓繘琛屾搷浣溿€?/p>
-            <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">濡傛湁鍏朵粬鐤戦棶鍙仈绯?QQ锛?31779708 寰俊锛歾hinian_znbk</p>
+            <label className="input-label">对接卡密秘钥</label>
+            <p className="text-xs text-gray-500 mb-2">用于「分销卡券」页面对接上游卡券系统的鉴权秘钥，请妥善保管。修改后点击「保存」生效。</p>
+            <p className="text-xs text-gray-500 mb-2">秘钥资金流水和余额充值，请进入 <a className="text-xs text-blue-600 dark:text-blue-400 mb-2" href="http://agent.zhinianboke.com" target='_BLANK'>agent.zhinianboke.com</a> 中进行操作。</p>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">如有其他疑问可联系 QQ：531779708 微信：zhinian_znbk</p>
             <div className="flex items-center gap-3 flex-wrap">
               <div className="relative flex-1 min-w-[260px]">
                 <input
                   type="text"
                   value={cardSecretKey}
                   onChange={(e) => setCardSecretKey(e.target.value)}
-                  placeholder="璇疯緭鍏ュ鎺ュ崱瀵嗙閽?
+                  placeholder="请输入对接卡密秘钥"
                   className="input-ios pr-10"
                   style={{ WebkitTextSecurity: showCardSecretKey ? 'none' : 'disc' } as React.CSSProperties}
                 />
@@ -681,7 +681,7 @@ export function PersonalSettings() {
                   type="button"
                   onClick={() => setShowCardSecretKey(!showCardSecretKey)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                  title={showCardSecretKey ? '闅愯棌' : '鏄剧ず'}
+                  title={showCardSecretKey ? '隐藏' : '显示'}
                 >
                   {showCardSecretKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -690,35 +690,35 @@ export function PersonalSettings() {
                 onClick={handleCreateCardSecretKey}
                 disabled={creatingCardSecretKey || !!cardSecretKey.trim()}
                 className="btn-ios-secondary text-sm"
-                title={cardSecretKey.trim() ? '绉橀挜宸插瓨鍦紝濡傞渶閲嶆柊鍒涘缓璇疯仈绯荤鐞嗗憳閲嶇疆' : '涓€閿垱寤哄鎺ュ崱瀵嗙閽?}
+                title={cardSecretKey.trim() ? '秘钥已存在，如需重新创建请联系管理员重置' : '一键创建对接卡密秘钥'}
               >
                 {creatingCardSecretKey ? <ButtonLoading /> : <Plus className="w-4 h-4" />}
-                鍒涘缓
+                创建
               </button>
               <button
                 onClick={handleSaveCardSecretKey}
                 disabled={savingCardSecretKey}
                 className="btn-ios-primary text-sm"
-                title="淇濆瓨瀵规帴鍗″瘑绉橀挜"
+                title="保存对接卡密秘钥"
               >
                 {savingCardSecretKey ? <ButtonLoading /> : <Save className="w-4 h-4" />}
-                淇濆瓨
+                保存
               </button>
             </div>
           </div>
 
-          {/* 鑱旂郴鏂瑰紡 */}
+          {/* 联系方式 */}
           <div>
-            <label className="input-label">鑱旂郴鏂瑰紡</label>
-            <p className="text-xs text-gray-500 mb-2">璁剧疆鎮ㄧ殑寰俊鍜孮Q锛屾柟渚垮垎閿€鍟嗚仈绯绘偍</p>
+            <label className="input-label">联系方式</label>
+            <p className="text-xs text-gray-500 mb-2">设置您的微信和QQ，方便分销商联系您</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="input-label">寰俊</label>
+                <label className="input-label">微信</label>
                 <input
                   type="text"
                   value={contactWechat}
                   onChange={(e) => setContactWechat(e.target.value)}
-                  placeholder="璇疯緭鍏ュ井淇″彿"
+                  placeholder="请输入微信号"
                   className="input-ios"
                 />
               </div>
@@ -728,7 +728,7 @@ export function PersonalSettings() {
                   type="text"
                   value={contactQQ}
                   onChange={(e) => setContactQQ(e.target.value)}
-                  placeholder="璇疯緭鍏Q鍙?
+                  placeholder="请输入QQ号"
                   className="input-ios"
                 />
               </div>
@@ -739,36 +739,36 @@ export function PersonalSettings() {
               className="btn-ios-primary mt-3"
             >
               {savingContact ? <ButtonLoading /> : <Save className="w-4 h-4" />}
-              淇濆瓨鑱旂郴鏂瑰紡
+              保存联系方式
             </button>
           </div>
         </div>
       </div>
 
-      {/* 閲嶅彂璐цЕ鍙戝叧閿瓧 */}
+      {/* 重发货触发关键字 */}
       <div className="vben-card">
         <div className="vben-card-header">
           <h2 className="vben-card-title">
             <Package className="w-4 h-4" />
-            閲嶅彂璐цЕ鍙戝叧閿瓧
+            重发货触发关键字
           </h2>
         </div>
         <div className="vben-card-body space-y-4">
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            璁剧疆鍚庯紝鍦ㄩ棽楸艰亰澶╀腑鑷繁鍙戦€併€屽叧閿瓧+璁㈠崟鍙枫€嶅嵆鍙Е鍙戣嚜鍔ㄩ噸鏂板彂璐с€備緥濡傚叧閿瓧涓恒€岄噸鏂拌Е鍙戙€嶏紝鍙戦€併€?502144774044041438閲嶆柊瑙﹀彂銆嶅皢鎻愬彇璁㈠崟鍙峰苟鑷姩鍙戣揣銆?
+            设置后，在闲鱼聊天中自己发送「关键字+订单号」即可触发自动重新发货。例如关键字为「重新触发」，发送「4502144774044041438重新触发」将提取订单号并自动发货。
             <br />
-            <span className="text-amber-500 dark:text-amber-400">娉ㄦ剰锛氬叧閿瓧涓嶅寘鍚墠鍚庣┖鏍硷紱濡傛灉璁㈠崟涓嶅湪鏁版嵁搴撲腑锛岀郴缁熶細鑷姩鏍规嵁璁㈠崟鍙疯幏鍙栬鍗曚俊鎭悗鍐嶅彂璐с€?/span>
+            <span className="text-amber-500 dark:text-amber-400">注意：关键字不包含前后空格；如果订单不在数据库中，系统会自动根据订单号获取订单信息后再发货。</span>
           </p>
           <div className="input-group">
-            <label className="input-label">瑙﹀彂鍏抽敭瀛?/label>
+            <label className="input-label">触发关键字</label>
             <input
               type="text"
               value={redeliveryKeyword}
               onChange={(e) => setRedeliveryKeyword(e.target.value)}
-              placeholder="渚嬪锛氶噸鏂拌Е鍙?
+              placeholder="例如：重新触发"
               className="input-ios"
             />
-            <p className="text-xs text-gray-400 mt-1">淇濆瓨鏃朵細鑷姩鍘婚櫎鍓嶅悗绌烘牸锛涚暀绌哄垯鍏抽棴姝ゅ姛鑳?/p>
+            <p className="text-xs text-gray-400 mt-1">保存时会自动去除前后空格；留空则关闭此功能</p>
           </div>
           <button
             onClick={handleSaveRedeliveryKeyword}
@@ -776,49 +776,49 @@ export function PersonalSettings() {
             className="btn-ios-primary"
           >
             {savingRedeliveryKeyword ? <ButtonLoading /> : <Save className="w-4 h-4" />}
-            淇濆瓨
+            保存
           </button>
         </div>
       </div>
 
-      {/* 淇敼瀵嗙爜 */}
+      {/* 修改密码 */}
       <div className="vben-card">
         <div className="vben-card-header">
           <h2 className="vben-card-title">
             <Key className="w-4 h-4" />
-            淇敼瀵嗙爜
+            修改密码
           </h2>
         </div>
         <div className="vben-card-body space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="input-group">
-              <label className="input-label">褰撳墠瀵嗙爜</label>
+              <label className="input-label">当前密码</label>
               <input
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="璇疯緭鍏ュ綋鍓嶅瘑鐮?
+                placeholder="请输入当前密码"
                 className="input-ios"
               />
             </div>
             <div />
             <div className="input-group">
-              <label className="input-label">鏂板瘑鐮?/label>
+              <label className="input-label">新密码</label>
               <input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="璇疯緭鍏ユ柊瀵嗙爜锛堣嚦灏?浣嶏級"
+                placeholder="请输入新密码（至少6位）"
                 className="input-ios"
               />
             </div>
             <div className="input-group">
-              <label className="input-label">纭鏂板瘑鐮?/label>
+              <label className="input-label">确认新密码</label>
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="璇峰啀娆¤緭鍏ユ柊瀵嗙爜"
+                placeholder="请再次输入新密码"
                 className="input-ios"
               />
             </div>
@@ -829,50 +829,50 @@ export function PersonalSettings() {
             className="btn-ios-primary"
           >
             {changingPassword ? <ButtonLoading /> : <Key className="w-4 h-4" />}
-            淇敼瀵嗙爜
+            修改密码
           </button>
         </div>
       </div>
 
-      {/* 閲嶇疆瀵规帴鐮佺‘璁ゅ脊绐?*/}
+      {/* 重置对接码确认弹窗 */}
       <ConfirmModal
         isOpen={resetConfirmOpen}
-        title="閲嶇疆瀵规帴鐮?
-        message="纭畾瑕侀噸缃鎺ョ爜鍚楋紵閲嶇疆鍚庢棫瀵规帴鐮佸皢澶辨晥锛岃纭繚宸查€氱煡鐩稿叧鍒嗛攢鍟嗐€?
-        confirmText="纭畾閲嶇疆"
-        cancelText="鍙栨秷"
+        title="重置对接码"
+        message="确定要重置对接码吗？重置后旧对接码将失效，请确保已通知相关分销商。"
+        confirmText="确定重置"
+        cancelText="取消"
         type="warning"
         loading={resettingDockCode}
         onConfirm={handleResetDockCode}
         onCancel={() => setResetConfirmOpen(false)}
       />
 
-      {/* 鏇存崲鍒嗛攢绉橀挜纭寮圭獥 */}
+      {/* 更换分销秘钥确认弹窗 */}
       <ConfirmModal
         isOpen={secretKeyResetConfirmOpen}
-        title="鏇存崲绉橀挜"
-        message="纭畾瑕佹洿鎹㈠垎閿€绉橀挜鍚楋紵鏇存崲鍚庡皢鐢熸垚鏂扮殑32浣嶇閽ワ紝鏃х閽ョ珛鍗冲け鏁堛€?
-        confirmText="纭畾鏇存崲"
-        cancelText="鍙栨秷"
+        title="更换秘钥"
+        message="确定要更换分销秘钥吗？更换后将生成新的32位秘钥，旧秘钥立即失效。"
+        confirmText="确定更换"
+        cancelText="取消"
         type="warning"
         loading={resettingSecretKey}
         onConfirm={handleResetSecretKey}
         onCancel={() => setSecretKeyResetConfirmOpen(false)}
       />
 
-      {/* 缁撶畻璁板綍寮圭獥 */}
+      {/* 结算记录弹窗 */}
       {showSettlementModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="flex h-[80vh] w-full max-w-5xl flex-col rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">缁撶畻璁板綍</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">鎸夊疄闄呭垱寤烘椂闂村€掑簭鏄剧ず锛屾渶鏂扮敵璇锋帓鍦ㄦ渶鍓嶉潰</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">结算记录</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">按实际创建时间倒序显示，最新申请排在最前面</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => loadSettlementRecords(settlementPage, settlementPageSize)} className="btn-ios-secondary text-sm" disabled={settlementLoading}>
                   <RefreshCw className={`w-4 h-4 ${settlementLoading ? 'animate-spin' : ''}`} />
-                  鍒锋柊
+                  刷新
                 </button>
                 <button
                   onClick={() => setShowSettlementModal(false)}
@@ -888,33 +888,33 @@ export function PersonalSettings() {
                 <table className="table-ios">
                   <thead>
                     <tr>
-                      <th>璁板綍ID</th>
-                      <th>鎻愮幇閲戦</th>
-                      <th>鏀舵鏂瑰紡</th>
-                      <th>鐘舵€?/th>
-                      <th>鎷掔粷鍘熷洜</th>
-                      <th>鍒涘缓鏃堕棿</th>
+                      <th>记录ID</th>
+                      <th>提现金额</th>
+                      <th>收款方式</th>
+                      <th>状态</th>
+                      <th>拒绝原因</th>
+                      <th>创建时间</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementLoading ? (
                       <tr>
                         <td colSpan={6}>
-                          <div className="py-10 text-center text-sm text-slate-500">鍔犺浇涓?..</div>
+                          <div className="py-10 text-center text-sm text-slate-500">加载中...</div>
                         </td>
                       </tr>
                     ) : settlementRecords.length === 0 ? (
                       <tr>
                         <td colSpan={6}>
-                          <div className="py-10 text-center text-sm text-slate-500">鏆傛棤缁撶畻璁板綍</div>
+                          <div className="py-10 text-center text-sm text-slate-500">暂无结算记录</div>
                         </td>
                       </tr>
                     ) : (
                       settlementRecords.map((record) => (
                         <tr key={record.id}>
                           <td>{record.id}</td>
-                          <td>楼{record.amount}</td>
-                          <td>{record.payment_type === 'wechat' ? '寰俊' : record.payment_type === 'alipay' ? '鏀粯瀹? : (record.alipay_id ? '鏀粯瀹? : '-')}</td>
+                          <td>¥{record.amount}</td>
+                          <td>{record.payment_type === 'wechat' ? '微信' : record.payment_type === 'alipay' ? '支付宝' : (record.alipay_id ? '支付宝' : '-')}</td>
                           <td>
                             <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
                               record.status === 'pending_review' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
@@ -922,7 +922,7 @@ export function PersonalSettings() {
                               record.status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
                               'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                             }`}>
-                              {record.status === 'pending_review' ? '寰呭鏍? : record.status === 'approved' ? '宸查€氳繃' : record.status === 'paid' ? '宸叉墦娆? : '宸叉嫆缁?}
+                              {record.status === 'pending_review' ? '待审核' : record.status === 'approved' ? '已通过' : record.status === 'paid' ? '已打款' : '已拒绝'}
                             </span>
                           </td>
                           <td className="max-w-[200px] truncate text-red-600 dark:text-red-400" title={record.reject_reason || ''}>
@@ -939,7 +939,7 @@ export function PersonalSettings() {
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
               <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>姣忛〉</span>
+                <span>每页</span>
                 <select
                   value={settlementPageSize}
                   onChange={async (e) => {
@@ -954,7 +954,7 @@ export function PersonalSettings() {
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                 </select>
-                <span>鏉★紝鍏?{settlementTotal} 鏉?/span>
+                <span>条，共 {settlementTotal} 条</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -962,7 +962,7 @@ export function PersonalSettings() {
                   disabled={settlementPage <= 1 || settlementLoading}
                   className="btn-ios-secondary btn-sm"
                 >
-                  涓婁竴椤?
+                  上一页
                 </button>
                 <span className="px-3 text-sm text-gray-600 dark:text-gray-400">
                   {settlementPage} / {settlementTotalPages || 1}
@@ -972,7 +972,7 @@ export function PersonalSettings() {
                   disabled={settlementPage >= settlementTotalPages || settlementLoading || settlementTotalPages === 0}
                   className="btn-ios-secondary btn-sm"
                 >
-                  涓嬩竴椤?
+                  下一页
                 </button>
               </div>
             </div>
@@ -980,14 +980,14 @@ export function PersonalSettings() {
         </div>
       )}
 
-      {/* 鎻愮幇寮圭獥 */}
+      {/* 提现弹窗 */}
       {showWithdrawModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">鐢宠鎻愮幇</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">鎻愮幇鍚庡皢绔嬪嵆鎵ｅ噺浣欓锛屽苟鐢熸垚寰呭鏍哥粨绠楄褰?/p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">申请提现</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">提现后将立即扣减余额，并生成待审核结算记录</p>
               </div>
               <button
                 onClick={() => {
@@ -1001,31 +1001,31 @@ export function PersonalSettings() {
             </div>
             <div className="space-y-4">
               <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                <div>褰撳墠浣欓锛毬balance || '0.00'}</div>
+                <div>当前余额：¥{balance || '0.00'}</div>
                 <div className="mt-1">
-                  鏀舵鏂瑰紡锛歿paymentQrcode ? (paymentType === 'wechat' ? '寰俊' : '鏀粯瀹?) + '鏀舵鐮? : '鏈笂浼犳敹娆剧爜'}
+                  收款方式：{paymentQrcode ? (paymentType === 'wechat' ? '微信' : '支付宝') + '收款码' : '未上传收款码'}
                 </div>
                 {withdrawMinAmount && Number(withdrawMinAmount) > 0 && (
                   <div className="mt-1 text-amber-600 dark:text-amber-400">
-                    鏈€浣庢彁鐜伴噾棰濓細楼{withdrawMinAmount}
+                    最低提现金额：¥{withdrawMinAmount}
                   </div>
                 )}
               </div>
               <div>
-                <label className="input-label">鎻愮幇閲戦锛堝厓锛?/label>
+                <label className="input-label">提现金额（元）</label>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
                   value={withdrawAmount}
                   onChange={(e) => setWithdrawAmount(e.target.value)}
-                  placeholder="璇疯緭鍏ユ彁鐜伴噾棰?
+                  placeholder="请输入提现金额"
                   className="input-ios"
                   autoFocus
                 />
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                鎻愮幇鎻愪氦鍚庝細鍚屾鎵ｅ噺浣欓銆佸啓鍏ヨ祫閲戞祦姘达紝骞剁敓鎴愮姸鎬佷负鈥滃緟瀹℃牳鈥濈殑缁撶畻璁板綍銆?
+                提现提交后会同步扣减余额、写入资金流水，并生成状态为“待审核”的结算记录。
               </p>
               <div className="flex justify-end gap-3">
                 <button
@@ -1033,7 +1033,7 @@ export function PersonalSettings() {
                   className="btn-ios-secondary"
                   disabled={withdrawing}
                 >
-                  鍙栨秷
+                  取消
                 </button>
                 <button
                   onClick={handleWithdraw}
@@ -1041,7 +1041,7 @@ export function PersonalSettings() {
                   disabled={withdrawing}
                 >
                   {withdrawing ? <ButtonLoading /> : <ArrowUpFromLine className="w-4 h-4" />}
-                  纭鎻愮幇
+                  确认提现
                 </button>
               </div>
             </div>
@@ -1049,12 +1049,12 @@ export function PersonalSettings() {
         </div>
       )}
 
-      {/* 鏀舵鐮佺鐞嗗脊绐?*/}
+      {/* 收款码管理弹窗 */}
       {showQrcodeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">鏀舵鐮佺鐞?/h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">收款码管理</h3>
               <button
                 onClick={() => setShowQrcodeModal(false)}
                 className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
@@ -1063,9 +1063,9 @@ export function PersonalSettings() {
               </button>
             </div>
             <div className="space-y-4">
-              {/* 鏀舵绫诲瀷閫夋嫨 */}
+              {/* 收款类型选择 */}
               <div>
-                <label className="input-label">鏀舵鏂瑰紡</label>
+                <label className="input-label">收款方式</label>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setPaymentType('alipay')}
@@ -1075,7 +1075,7 @@ export function PersonalSettings() {
                         : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'
                     }`}
                   >
-                    鏀粯瀹?
+                    支付宝
                   </button>
                   <button
                     onClick={() => setPaymentType('wechat')}
@@ -1085,24 +1085,24 @@ export function PersonalSettings() {
                         : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'
                     }`}
                   >
-                    寰俊
+                    微信
                   </button>
                 </div>
               </div>
-              {/* 褰撳墠鏀舵鐮侀瑙?*/}
+              {/* 当前收款码预览 */}
               {paymentQrcode && (
                 <div className="text-center">
-                  <label className="input-label">褰撳墠鏀舵鐮?/label>
+                  <label className="input-label">当前收款码</label>
                   <img
                     src={paymentQrcode}
-                    alt="褰撳墠鏀舵鐮?
+                    alt="当前收款码"
                     className="mx-auto mt-2 h-40 w-40 rounded-xl border border-slate-200 object-contain dark:border-slate-700"
                   />
                 </div>
               )}
-              {/* 涓婁紶鍖哄煙 */}
+              {/* 上传区域 */}
               <div>
-                <label className="input-label">{paymentQrcode ? '鏇存崲鏀舵鐮? : '涓婁紶鏀舵鐮?}</label>
+                <label className="input-label">{paymentQrcode ? '更换收款码' : '上传收款码'}</label>
                 <div
                   onClick={() => qrcodeFileRef.current?.click()}
                   className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 py-8 transition hover:border-blue-400 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
@@ -1112,7 +1112,7 @@ export function PersonalSettings() {
                   ) : (
                     <>
                       <Upload className="mb-2 h-8 w-8 text-slate-400" />
-                      <span className="text-sm text-slate-500">鐐瑰嚮閫夋嫨鍥剧墖锛圝PG/PNG/WEBP锛?/span>
+                      <span className="text-sm text-slate-500">点击选择图片（JPG/PNG/WEBP）</span>
                     </>
                   )}
                 </div>
@@ -1125,11 +1125,11 @@ export function PersonalSettings() {
                 />
               </div>
               <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                璇蜂笂浼爗paymentType === 'wechat' ? '寰俊' : '鏀粯瀹?}鏀舵鐮佸浘鐗囷紝绠＄悊鍛樻墦娆炬椂灏嗙湅鍒版鏀舵鐮併€傚凡涓婁紶鐨勬敹娆剧爜鍙噸鏂颁笂浼犳浛鎹€?
+                请上传{paymentType === 'wechat' ? '微信' : '支付宝'}收款码图片，管理员打款时将看到此收款码。已上传的收款码可重新上传替换。
               </div>
               <div className="flex justify-end">
                 <button onClick={() => setShowQrcodeModal(false)} className="btn-ios-secondary">
-                  鍏抽棴
+                  关闭
                 </button>
               </div>
             </div>
@@ -1137,13 +1137,13 @@ export function PersonalSettings() {
         </div>
       )}
 
-      {/* 璧勯噾娴佹按寮圭獥 */}
+      {/* 资金流水弹窗 */}
       <FundFlowModal
         visible={showFundFlowModal}
         onClose={() => setShowFundFlowModal(false)}
       />
 
-      {/* 鍏呭€煎脊绐?*/}
+      {/* 充值弹窗 */}
       <RechargeModal
         visible={showRecharge}
         onClose={() => setShowRecharge(false)}
