@@ -24,6 +24,13 @@ ENV_FALLBACKS = {
     "activation_worker_count": "ACTIVATION_WORKER_COUNT",
     "desktop_background_mode": "DESKTOP_BACKGROUND_MODE",
     "desktop_allow_foreground_fallback": "DESKTOP_ALLOW_FOREGROUND_FALLBACK",
+    "ws_base_url": "WS_BASE_URL",
+    "ws_model": "WS_MODEL",
+    "ws_originator": "WS_ORIGINATOR",
+    "ws_openai_beta": "WS_OPENAI_BETA",
+    "ws_reconnect_limit": "WS_RECONNECT_LIMIT",
+    "ws_connect_timeout_seconds": "WS_CONNECT_TIMEOUT_SECONDS",
+    "ws_turn_timeout_seconds": "WS_TURN_TIMEOUT_SECONDS",
     "delivery_worker_count": "DELIVERY_WORKER_COUNT",
     "delivery_retry_limit": "DELIVERY_RETRY_LIMIT",
     "delivery_retry_base_seconds": "DELIVERY_RETRY_BASE_SECONDS",
@@ -65,6 +72,13 @@ def get_all_settings() -> dict[str, str]:
     data.setdefault("desktop_instance_pool", get_setting("desktop_instance_pool", settings.desktop_instance_pool))
     data.setdefault("activation_worker_count", str(settings.activation_worker_count))
     data.setdefault("desktop_background_mode", "true" if settings.desktop_background_mode else "false")
+    data.setdefault("ws_base_url", settings.ws_base_url)
+    data.setdefault("ws_model", settings.ws_model)
+    data.setdefault("ws_originator", settings.ws_originator)
+    data.setdefault("ws_openai_beta", settings.ws_openai_beta)
+    data.setdefault("ws_reconnect_limit", str(settings.ws_reconnect_limit))
+    data.setdefault("ws_connect_timeout_seconds", str(settings.ws_connect_timeout_seconds))
+    data.setdefault("ws_turn_timeout_seconds", str(settings.ws_turn_timeout_seconds))
     data.setdefault("oauth_reauth_retry_limit", str(settings.oauth_reauth_retry_limit))
     data.setdefault("oauth_reauth_retry_delay_seconds", str(settings.oauth_reauth_retry_delay_seconds))
     return data
@@ -92,6 +106,13 @@ def update_settings(values: dict[str, Any]) -> dict[str, str]:
         "activation_worker_count",
         "desktop_background_mode",
         "desktop_allow_foreground_fallback",
+        "ws_base_url",
+        "ws_model",
+        "ws_originator",
+        "ws_openai_beta",
+        "ws_reconnect_limit",
+        "ws_connect_timeout_seconds",
+        "ws_turn_timeout_seconds",
         "delivery_worker_count",
         "delivery_retry_limit",
         "delivery_retry_base_seconds",

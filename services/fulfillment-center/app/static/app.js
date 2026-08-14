@@ -43,6 +43,15 @@ const statusLabels = {
   opening_codex: "打开 Codex",
   sending: "发送你好",
   waiting_response: "等待回复",
+  ws_connect_failed: "WS 连接失败",
+  ws_models_failed: "WS 模型目录失败",
+  ws_missing_credentials: "WS 缺少凭证",
+  ws_auth_failed: "WS 凭证被拒",
+  ws_http_error: "WS 握手错误",
+  ws_turn_failed: "WS 激活失败",
+  ws_no_reply: "WS 无回复文本",
+  turn_status_unknown: "发送结果未知",
+  dry_run: "模拟模式",
   failed: "失败",
   reauth_required: "需要重新授权",
 };
@@ -415,6 +424,13 @@ async function loadSettings() {
   $("xianyuAccountId").value = data.xianyu_account_id || "";
   $("xianyuToken").value = data.xianyu_api_token || "";
   $("activationProvider").value = data.activation_provider || "desktop";
+  $("wsBaseUrl").value = data.ws_base_url || "";
+  $("wsModel").value = data.ws_model || "";
+  $("wsOriginator").value = data.ws_originator || "codex_chatgpt_desktop";
+  $("wsOpenaiBeta").value = data.ws_openai_beta || "responses_websockets=2026-02-06";
+  $("wsReconnectLimit").value = data.ws_reconnect_limit || "5";
+  $("wsConnectTimeout").value = data.ws_connect_timeout_seconds || "15";
+  $("wsTurnTimeout").value = data.ws_turn_timeout_seconds || "180";
   $("desktopInstanceName").value = data.desktop_instance_name || "fixed-desktop-instance";
   $("desktopInstanceId").value = data.desktop_instance_id || "";
   $("desktopProfileDir").value = data.desktop_profile_dir || "";
@@ -581,6 +597,13 @@ function bindActions() {
       xianyu_account_id: $("xianyuAccountId").value.trim(),
       xianyu_api_token: $("xianyuToken").value.trim(),
       activation_provider: $("activationProvider").value,
+      ws_base_url: $("wsBaseUrl").value.trim(),
+      ws_model: $("wsModel").value.trim(),
+      ws_originator: $("wsOriginator").value.trim(),
+      ws_openai_beta: $("wsOpenaiBeta").value.trim(),
+      ws_reconnect_limit: $("wsReconnectLimit").value || "5",
+      ws_connect_timeout_seconds: $("wsConnectTimeout").value || "15",
+      ws_turn_timeout_seconds: $("wsTurnTimeout").value || "180",
       desktop_instance_name: $("desktopInstanceName").value.trim(),
       desktop_instance_id: $("desktopInstanceId").value.trim(),
       desktop_profile_dir: $("desktopProfileDir").value.trim(),

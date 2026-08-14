@@ -103,6 +103,14 @@ th { background: #f2ede4; color: #4d473f; position: sticky; top: 0; }
 .ship-grid, .settings-grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; }
 .form-panel label, .ship-grid label { display: grid; gap: 6px; margin-bottom: 10px; color: var(--muted); font-size: 13px; }
 .form-panel input, .ship-grid input { width: 100%; }
+fieldset.ws-settings {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+}
+fieldset.ws-settings legend { font-weight: 600; color: var(--ink); padding: 0 6px; }
+fieldset.ws-settings small { display: block; color: var(--muted); margin-bottom: 8px; line-height: 1.5; }
 .template-panel textarea { width: 100%; min-height: 280px; }
 pre {
   white-space: pre-wrap;
