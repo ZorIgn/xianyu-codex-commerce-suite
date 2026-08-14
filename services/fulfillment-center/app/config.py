@@ -47,6 +47,13 @@ class Settings:
     activation_worker_count: int
     desktop_background_mode: bool
     desktop_allow_foreground_fallback: bool
+    ws_base_url: str
+    ws_model: str
+    ws_originator: str
+    ws_openai_beta: str
+    ws_reconnect_limit: int
+    ws_connect_timeout_seconds: int
+    ws_turn_timeout_seconds: int
     oauth_reauth_retry_limit: int
     oauth_reauth_retry_delay_seconds: float
     abai_project_root: Path
@@ -94,6 +101,13 @@ def get_settings() -> Settings:
         activation_worker_count=max(1, int(os.getenv("ACTIVATION_WORKER_COUNT", "3"))),
         desktop_background_mode=_bool(os.getenv("DESKTOP_BACKGROUND_MODE"), False),
         desktop_allow_foreground_fallback=_bool(os.getenv("DESKTOP_ALLOW_FOREGROUND_FALLBACK"), False),
+        ws_base_url=os.getenv("WS_BASE_URL", "https://chatgpt.com/backend-api/codex").strip(),
+        ws_model=os.getenv("WS_MODEL", "").strip(),
+        ws_originator=os.getenv("WS_ORIGINATOR", "codex_chatgpt_desktop").strip(),
+        ws_openai_beta=os.getenv("WS_OPENAI_BETA", "responses_websockets=2026-02-06").strip(),
+        ws_reconnect_limit=max(1, int(os.getenv("WS_RECONNECT_LIMIT", "5"))),
+        ws_connect_timeout_seconds=max(1, int(os.getenv("WS_CONNECT_TIMEOUT_SECONDS", "15"))),
+        ws_turn_timeout_seconds=max(10, int(os.getenv("WS_TURN_TIMEOUT_SECONDS", "180"))),
         oauth_reauth_retry_limit=max(1, int(os.getenv("OAUTH_REAUTH_RETRY_LIMIT", "3"))),
         oauth_reauth_retry_delay_seconds=max(0.0, float(os.getenv("OAUTH_REAUTH_RETRY_DELAY_SECONDS", "2"))),
         abai_project_root=abai_root,

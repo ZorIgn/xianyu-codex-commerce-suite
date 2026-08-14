@@ -21,6 +21,7 @@ from ..inventory import (
 )
 from ..settings_store import get_setting
 from ..oauth_reauth import automatic_reauthorize_inventory_oauth_retry
+from .codex_ws_provider import CodexWsProvider
 from .desktop_provider import DesktopInstance, DesktopProvider
 
 
@@ -28,7 +29,14 @@ _MANAGER: "ActivationQueueManager | None" = None
 _WORKER_LOCK_NAME = "desktop-activation"
 _WORKER_LEASE_SECONDS = 120
 _HEARTBEAT_SECONDS = 15
-_RETRYABLE_DESKTOP_STAGES = {"switching_account", "starting_desktop"}
+_ACTIVATION_PROVIDERS = {"cli", "desktop", "ws"}
+# 任务级重试只允许在这些“消息一定还没发出”的阶段发生。
+_RETRYABLE_PROVIDER_STAGES = {
+    "switching_account",
+    "starting_desktop",
+    "ws_connect_failed",
+    "ws_models_failed",
+}
 
 
 def _reauth_before_activation_enabled() -> bool:
@@ -46,7 +54,15 @@ def _setting_int(key: str, fallback: int, minimum: int = 1) -> int:
 
 def _activation_provider() -> str:
     settings = get_settings()
-    return get_setting("activation_provider", settings.activation_provider).strip().lower() or "desktop"
+    provider = (
+        get_setting("activation_provider", settings.activation_provider)
+        .strip()
+        .lower()
+        or "desktop"
+    )
+    if provider not in _ACTIVATION_PROVIDERS:
+        raise RuntimeError(f"不支持的激活提供方: {provider}")
+    return provider
 
 
 def automatic_reauthorize_inventory_oauth(inventory_id: int) -> dict[str, Any]:
@@ -740,12 +756,20 @@ class ActivationQueueManager:
                 "error": result.error,
                 "stage": "cli",
             }
-        return await DesktopProvider().activate(
-            item,
-            "你好",
-            stage_callback=stage_callback,
-            instance=instance,
-        )
+        if provider == "ws":
+            return await CodexWsProvider().activate(
+                item,
+                "你好",
+                stage_callback=stage_callback,
+            )
+        if provider == "desktop":
+            return await DesktopProvider().activate(
+                item,
+                "你好",
+                stage_callback=stage_callback,
+                instance=instance,
+            )
+        raise RuntimeError(f"不支持的激活提供方: {provider}")
 
     async def _reauthorize_before_activation(
         self, job: dict[str, Any],
@@ -822,8 +846,13 @@ class ActivationQueueManager:
         self,
         batch_id: int,
         instance: DesktopInstance | None = None,
+        slot: int = 0,
     ) -> None:
-        instance_key = str(instance.codex_home) if instance else "cli"
+        if instance is not None:
+            instance_key = str(instance.codex_home)
+        else:
+            # cli / ws 没有实例级共享状态：按 worker 槽位并发，互不阻塞。
+            instance_key = f"{_activation_provider()}:slot-{int(slot)}"
         instance_lock = self.instance_locks.setdefault(instance_key, asyncio.Lock())
         async with instance_lock:
             batch = _batch_dict(batch_id)
@@ -907,7 +936,7 @@ class ActivationQueueManager:
                     if (
                         attempt + 1 >= attempts
                         or sent_unknown
-                        or stage not in _RETRYABLE_DESKTOP_STAGES
+                        or stage not in _RETRYABLE_PROVIDER_STAGES
                     ):
                         break
                     await asyncio.sleep(1)
@@ -1073,7 +1102,8 @@ class ActivationQueueManager:
         settings = get_settings()
         count = _setting_int("activation_worker_count", settings.activation_worker_count)
         provider = _activation_provider()
-        if provider == "cli":
+        if provider in {"cli", "ws"}:
+            # 无界面提供方：并发数 = worker 数量，没有实例池限制。
             return [None] * count
         instances = DesktopProvider().resolve_instances()
         return instances[: min(count, len(instances))]
@@ -1098,7 +1128,7 @@ class ActivationQueueManager:
                 name=f"activation-heartbeat-{slot}-{batch_id}",
             )
             try:
-                await self.process_batch(batch_id, instance=instance)
+                await self.process_batch(batch_id, instance=instance, slot=slot)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1232,7 +1262,7 @@ def worker_status() -> dict[str, Any]:
     settings = get_settings()
     pool_error = ""
     instance_count = 0
-    if provider != "cli":
+    if provider == "desktop":
         try:
             instance_count = len(DesktopProvider().resolve_instances())
         except Exception as exc:
@@ -1255,7 +1285,10 @@ def worker_status() -> dict[str, Any]:
         ).fetchone()
     lock_owner = str(lock_row["owner"] or "") if lock_row else ""
     configured_count = _setting_int("activation_worker_count", settings.activation_worker_count)
-    capacity = configured_count if provider == "cli" else min(configured_count, instance_count)
+    if provider == "desktop":
+        capacity = min(configured_count, instance_count)
+    else:
+        capacity = configured_count
     result = {
         "running": bool(manager.task and not manager.task.done()),
         "leader": bool(manager.is_leader and lock_owner == manager.owner),

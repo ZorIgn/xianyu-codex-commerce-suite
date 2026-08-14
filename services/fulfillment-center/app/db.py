@@ -291,6 +291,13 @@ DEFAULT_SETTINGS = {
     "delivery_retry_base_seconds": "1",
     "delivery_quantity_reconcile_delays": "0.5,1,2",
     "desktop_allow_foreground_fallback": "false",
+    "ws_base_url": "",
+    "ws_model": "",
+    "ws_originator": "codex_chatgpt_desktop",
+    "ws_openai_beta": "responses_websockets=2026-02-06",
+    "ws_reconnect_limit": "5",
+    "ws_connect_timeout_seconds": "15",
+    "ws_turn_timeout_seconds": "180",
 }
 
 
