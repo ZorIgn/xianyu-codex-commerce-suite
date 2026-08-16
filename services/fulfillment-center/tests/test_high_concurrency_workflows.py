@@ -157,6 +157,13 @@ class HighConcurrencyWorkflowTest(unittest.TestCase):
             conn.execute(
                 """
                 INSERT INTO app_settings(key, value, updated_at)
+                VALUES ('activation_provider', 'desktop', datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value, updated_at)
                 VALUES ('desktop_instance_pool', '{bad-json', datetime('now'))
                 ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
                 """

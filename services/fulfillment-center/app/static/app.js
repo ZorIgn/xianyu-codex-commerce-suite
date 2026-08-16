@@ -423,7 +423,7 @@ async function loadSettings() {
   $("xianyuEndpoint").value = data.xianyu_send_endpoint || "/internal/accounts/{account_id}/send-message";
   $("xianyuAccountId").value = data.xianyu_account_id || "";
   $("xianyuToken").value = data.xianyu_api_token || "";
-  $("activationProvider").value = data.activation_provider || "desktop";
+  $("activationProvider").value = data.activation_provider || "ws";
   $("wsBaseUrl").value = data.ws_base_url || "";
   $("wsProxyUrl").value = data.ws_proxy_url || "";
   $("wsModel").value = data.ws_model || "gpt-5.6-luna";

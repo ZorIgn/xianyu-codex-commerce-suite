@@ -127,10 +127,10 @@
             <label>闲鱼账号 ID <input id="xianyuAccountId" placeholder="xianyu account_id" /></label>
             <label>闲鱼 API Token <input id="xianyuToken" placeholder="没有可留空" /></label>
             <h3>固定桌面激活实例</h3>
-            <label>激活提供方 <select id="activationProvider"><option value="ws">Codex WebSocket 协议激活（无界面，实验性）</option><option value="desktop">ChatGPT/Codex 桌面端</option><option value="cli">Codex CLI 回退</option></select></label>
+            <label>激活提供方 <select id="activationProvider"><option value="ws">Codex WebSocket 协议激活（无界面，默认）</option><option value="desktop">ChatGPT/Codex 桌面端</option><option value="cli">Codex CLI 回退</option></select></label>
             <fieldset class="ws-settings">
-              <legend>WebSocket 协议激活（实验性，暂未真实账号验证）</legend>
-              <small>不拉起桌面端，按真实 Codex Desktop 的 WS 会话链路发送“你好”（预热帧 + 正式 turn）；断线最多重连 5 次，绝不走 HTTP。</small>
+              <legend>WebSocket 协议激活（默认）</legend>
+              <small>已通过真实账号验证。不拉起桌面端，按 Codex Desktop 的 WS 会话链路发送“你好”（预热帧 + 正式 turn）；使用前请填写可用代理，断线最多重连 5 次，绝不走 HTTP。</small>
               <label>Codex 后端地址 <input id="wsBaseUrl" placeholder="https://chatgpt.com/backend-api/codex" /></label>
               <label>WS 代理地址 <input id="wsProxyUrl" placeholder="http://127.0.0.1:7890" /></label>
               <label>模型 <input id="wsModel" placeholder="gpt-5.6-luna" /></label>

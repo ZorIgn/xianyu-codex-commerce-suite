@@ -89,7 +89,7 @@ def get_settings() -> Settings:
         codex_command=os.getenv("CODEX_COMMAND", "codex"),
         codex_timeout_seconds=int(os.getenv("CODEX_TIMEOUT_SECONDS", "45")),
         dry_run=_bool(os.getenv("DRY_RUN"), True),
-        activation_provider=os.getenv("ACTIVATION_PROVIDER", "desktop").strip().lower() or "desktop",
+        activation_provider=os.getenv("ACTIVATION_PROVIDER", "ws").strip().lower() or "ws",
         cockpit_state_dir=Path(os.getenv("COCKPIT_STATE_DIR", str(Path.home() / ".antigravity_cockpit"))),
         desktop_instance_id=os.getenv("DESKTOP_INSTANCE_ID", "").strip(),
         desktop_instance_name=os.getenv("DESKTOP_INSTANCE_NAME", "fixed-desktop-instance").strip() or "fixed-desktop-instance",
