@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import secrets
 import time
 import uuid
 from typing import Any, Callable
@@ -13,22 +14,36 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from ..audit import write_audit
 from ..config import get_settings
-from ..settings_store import get_setting
+from ..settings_store import get_setting, update_settings
 from .base_provider import result_dict
+from .codex_desktop_wire import (
+    DEFAULT_TOOLS_JSON,
+    DESKTOP_APP_CONTEXT,
+    DESKTOP_APPS_INSTRUCTIONS,
+    DESKTOP_BASE_INSTRUCTIONS,
+    DESKTOP_PERMISSIONS_INSTRUCTIONS,
+    DESKTOP_RECOMMENDED_PLUGINS,
+    DESKTOP_SKILLS_INSTRUCTIONS,
+    desktop_environment_context,
+)
 from .desktop_provider import _extract_oauth_tokens
 
-# 与已安装的 codex-cli 0.140.0 对齐：Codex 后端 Responses API 的 WebSocket 传输。
-# 参考 codex-rs（openai/codex）:
+# 与真实 Codex Desktop（0.147.0-alpha.6.6）对齐的传输参数，参考 openai/codex 源码：
 #   - 端点: wss://chatgpt.com/backend-api/codex/responses
-#   - 握手头: OpenAI-Beta: responses_websockets=2026-02-06、originator、session-id 等
-#   - 首帧: {"type": "response.create", ...Responses API 字段}
-#   - 事件: response.output_text.delta / response.completed / response.failed / error
+#   - originator: "Codex Desktop"；握手带 OpenAI-Beta、version、session/thread/window id
+#   - 先发 generate:false 预热帧拿到 warm response id 与 x-codex-turn-state，
+#     再在同一连接上用 previous_response_id 发送正式 turn
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 DEFAULT_OPENAI_BETA = "responses_websockets=2026-02-06"
-DEFAULT_ORIGINATOR = "codex_chatgpt_desktop"  # ChatGPT 桌面端 Codex 的 originator
-CLIENT_VERSION = "0.140.0"
+DEFAULT_ORIGINATOR = "Codex Desktop"
+DEFAULT_CLIENT_VERSION = "0.147.0-alpha.6.6"
 
 _MODEL_CACHE_TTL_SECONDS = 300.0
+X_CODEX_TURN_STATE = "x-codex-turn-state"
+X_CODEX_TURN_METADATA = "x-codex-turn-metadata"
+X_CODEX_INSTALLATION_ID = "x-codex-installation-id"
+X_CODEX_WINDOW_ID = "x-codex-window-id"
+WS_TRACEPARENT_KEY = "ws_request_header_traceparent"
 
 
 def _setting(key: str, fallback: str) -> str:
@@ -42,16 +57,40 @@ def _setting_int(key: str, fallback: int, minimum: int = 1) -> int:
         return max(minimum, fallback)
 
 
-class CodexWsProvider:
-    """无界面 Codex 激活提供方。
+def _uuid7() -> str:
+    """UUIDv7（RFC 9562）：与桌面端 session/thread/turn/window id 同格式。"""
+    ts_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48-bit
+    rand_a = secrets.randbits(12)
+    rand_b = secrets.randbits(62)
+    value = (
+        (ts_ms << 80)
+        | (0x7 << 76)          # version 7
+        | (rand_a << 64)
+        | (0b10 << 62)         # variant 10
+        | rand_b
+    )
+    text = f"{value:032x}"
+    return f"{text[0:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:32]}"
 
-    不走 HTTP、不拉起桌面端：把“你好”装包成 WebSocket 帧，直接发送到 Codex
-    Responses WebSocket 端点。断线重连最多 ``ws_reconnect_limit`` 次（默认 5 次，
-    与 Codex 客户端的 stream 重试次数一致）；重连只发生在“消息尚未发出”的阶段，
-    一旦 turn 帧已发出，断线只上报状态未知，绝不重发，避免重复激活。
+
+def _traceparent() -> str:
+    trace = secrets.token_hex(16)
+    span = secrets.token_hex(8)
+    return f"00-{trace}-{span}-01"
+
+
+class CodexWsProvider:
+    """无界面 Codex 激活：按真实 Codex Desktop 的 WebSocket 会话链路发送“你好”。
+
+    与桌面端一致的行为：
+    - originator "Codex Desktop"、桌面版 User-Agent/version 头、UUIDv7 会话 id
+    - 同一连接上先发 generate:false 预热帧，再带 previous_response_id 发正式 turn
+    - 完整 instructions、桌面 app-context/skills/permissions 上下文、工具声明、
+      prompt_cache_key、service_tier、include、x-codex-turn-metadata
+    - 只在“正式 turn 尚未发出”的阶段重连（默认 5 次），发出后断线绝不重发
     """
 
-    _model_cache: dict[str, tuple[float, str]] = {}
+    _model_cache: dict[str, tuple[float, str, str, str]] = {}
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -61,14 +100,26 @@ class CodexWsProvider:
     def _base_url(self) -> str:
         return _setting("ws_base_url", self.settings.ws_base_url) or DEFAULT_BASE_URL
 
+    def _proxy_url(self) -> str:
+        return _setting("ws_proxy_url", self.settings.ws_proxy_url)
+
     def _originator(self) -> str:
         return _setting("ws_originator", self.settings.ws_originator) or DEFAULT_ORIGINATOR
 
-    def _openai_beta(self) -> str:
+    def _client_version(self) -> str:
         return (
-            _setting("ws_openai_beta", self.settings.ws_openai_beta)
-            or DEFAULT_OPENAI_BETA
+            _setting("ws_client_version", self.settings.ws_client_version)
+            or DEFAULT_CLIENT_VERSION
         )
+
+    def _openai_beta(self) -> str:
+        return _setting("ws_openai_beta", self.settings.ws_openai_beta) or DEFAULT_OPENAI_BETA
+
+    def _service_tier(self) -> str:
+        return _setting("ws_service_tier", self.settings.ws_service_tier) or "priority"
+
+    def _reasoning_effort(self) -> str:
+        return _setting("ws_reasoning_effort", self.settings.ws_reasoning_effort) or "medium"
 
     def _reconnect_limit(self) -> int:
         return _setting_int("ws_reconnect_limit", self.settings.ws_reconnect_limit)
@@ -97,6 +148,25 @@ class CodexWsProvider:
             value = float(self.settings.ws_turn_timeout_seconds)
         return max(10.0, value)
 
+    def _tools(self) -> list[Any]:
+        raw = _setting("ws_tools_json", self.settings.ws_tools_json)
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        return list(DEFAULT_TOOLS_JSON)
+
+    def _installation_id(self) -> str:
+        current = _setting("ws_installation_id", self.settings.ws_installation_id)
+        if current and len(current) >= 32:
+            return current
+        generated = str(uuid.uuid4())
+        update_settings({"ws_installation_id": generated})
+        return generated
+
     # ------------------------------------------------------------------ headers
 
     def _headers(
@@ -105,18 +175,20 @@ class CodexWsProvider:
         account_id: str,
         *,
         model: str = "",
+        tier: str = "",
         session_id: str = "",
         thread_id: str = "",
+        window_id: str = "",
     ) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "User-Agent": (
-                f"{self._originator()}/{CLIENT_VERSION} "
-                "(Windows; x86_64) xianyu-codex-fulfillment"
+                f"{self._originator()}/{self._client_version()} "
+                f"(Windows 10.0.26100; x86_64) unknown"
             ),
             "originator": self._originator(),
             "OpenAI-Beta": self._openai_beta(),
-            "version": CLIENT_VERSION,
+            "version": self._client_version(),
         }
         if account_id:
             headers["ChatGPT-Account-ID"] = account_id
@@ -125,8 +197,13 @@ class CodexWsProvider:
             headers["thread-id"] = thread_id
         if session_id:
             headers["session-id"] = session_id
+        if window_id:
+            headers["x-codex-window-id"] = window_id
         if model:
-            headers["x-codex-routing-hint"] = f"model={model}"
+            hint = f"model={model}"
+            if tier:
+                hint += f";tier={tier}"
+            headers["x-codex-routing-hint"] = hint
         return headers
 
     # -------------------------------------------------------------- model pick
@@ -135,97 +212,328 @@ class CodexWsProvider:
         self,
         access_token: str,
         account_id: str,
-    ) -> tuple[str, str]:
-        """从账号模型目录选出默认模型；返回 (slug, error)。"""
+    ) -> tuple[str, str, str, str]:
+        """返回 (slug, default_service_tier, default_reasoning_level, error)。"""
         base_url = self._base_url().rstrip("/")
         headers = self._headers(access_token, account_id)
-        url = f"{base_url}/models?client_version={CLIENT_VERSION}"
+        url = f"{base_url}/models?client_version={self._client_version()}"
+        proxy = self._proxy_url() or None
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, proxy=proxy) as client:
                 response = await client.get(url, headers=headers)
             if response.status_code != 200:
-                return "", f"模型目录请求失败: HTTP {response.status_code}"
+                return "", "", "", f"模型目录请求失败: HTTP {response.status_code}"
             payload = response.json()
             models = payload.get("models") if isinstance(payload, dict) else None
             if not isinstance(models, list) or not models:
-                return "", "模型目录为空"
+                return "", "", "", "模型目录为空"
             default = next(
                 (entry for entry in models if entry.get("is_default")),
                 models[0],
             )
             slug = str((default or {}).get("slug") or "").strip()
             if not slug:
-                return "", "模型目录缺少 slug"
-            return slug, ""
+                return "", "", "", "模型目录缺少 slug"
+            tier = str((default or {}).get("default_service_tier") or "").strip()
+            effort = str((default or {}).get("default_reasoning_level") or "").strip()
+            return slug, tier, effort, ""
         except httpx.HTTPError as exc:
-            return "", f"模型目录请求异常: {exc}"
+            return "", "", "", f"模型目录请求异常: {exc}"
 
     async def _cached_model(
         self,
         item: dict[str, Any],
         access_token: str,
         account_id: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str, str]:
         explicit = _setting("ws_model", self.settings.ws_model)
         if explicit:
-            return explicit, ""
+            return explicit, "", "", ""
         key = account_id or str(item.get("email") or "") or "default"
         now = time.monotonic()
         cached = self._model_cache.get(key)
         if cached and cached[0] > now:
-            return cached[1], ""
-        slug, error = await self._fetch_model_catalog(access_token, account_id)
+            return cached[1], cached[2], cached[3], ""
+        slug, tier, effort, error = await self._fetch_model_catalog(access_token, account_id)
         if slug:
-            self._model_cache[key] = (now + _MODEL_CACHE_TTL_SECONDS, slug)
-        return slug, error
+            self._model_cache[key] = (now + _MODEL_CACHE_TTL_SECONDS, slug, tier, effort)
+        return slug, tier, effort, error
 
-    # --------------------------------------------------------------- turn flow
+    # ---------------------------------------------------------------- turn flow
 
     @staticmethod
-    def _request_frame(prompt: str, model: str, ids: dict[str, str]) -> dict[str, Any]:
-        return {
+    def _turn_metadata(
+        ids: dict[str, str], request_kind: str, *, turn_started_ms: int = 0
+    ) -> str:
+        payload: dict[str, Any] = {
+            "installation_id": ids["installation_id"],
+            "session_id": ids["session_id"],
+            "thread_id": ids["thread_id"],
+            "window_id": ids["window_id"],
+            "request_kind": request_kind,
+        }
+        if turn_started_ms:
+            payload["turn_started_at_unix_ms"] = turn_started_ms
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    def _client_metadata(
+        self,
+        ids: dict[str, str],
+        request_kind: str,
+        *,
+        turn_started_ms: int = 0,
+        turn_state: str = "",
+    ) -> dict[str, str]:
+        metadata = {
+            X_CODEX_INSTALLATION_ID: ids["installation_id"],
+            "session_id": ids["session_id"],
+            "thread_id": ids["thread_id"],
+            X_CODEX_WINDOW_ID: ids["window_id"],
+            X_CODEX_TURN_METADATA: self._turn_metadata(
+                ids, request_kind, turn_started_ms=turn_started_ms
+            ),
+            WS_TRACEPARENT_KEY: _traceparent(),
+        }
+        if request_kind == "turn":
+            metadata["turn_id"] = ids["turn_id"]
+        if turn_state:
+            metadata[X_CODEX_TURN_STATE] = turn_state
+        return metadata
+
+    def _warmup_frame(
+        self,
+        *,
+        model: str,
+        tier: str,
+        effort: str,
+        ids: dict[str, str],
+        cwd: str,
+    ) -> dict[str, Any]:
+        tools = self._tools()
+        developer_content = [
+            {"type": "input_text", "text": DESKTOP_APP_CONTEXT},
+            {"type": "input_text", "text": DESKTOP_SKILLS_INSTRUCTIONS},
+            {"type": "input_text", "text": DESKTOP_PERMISSIONS_INSTRUCTIONS},
+            {"type": "input_text", "text": DESKTOP_APPS_INSTRUCTIONS},
+        ]
+        plugins_content = [
+            {"type": "input_text", "text": DESKTOP_RECOMMENDED_PLUGINS},
+            {"type": "input_text", "text": desktop_environment_context(cwd)},
+        ]
+        frame: dict[str, Any] = {
             "type": "response.create",
             "model": model,
-            "instructions": "",
+            "instructions": DESKTOP_BASE_INSTRUCTIONS,
             "input": [
                 {
                     "type": "message",
+                    "id": f"msg_{ids['dev_msg_id']}",
+                    "role": "developer",
+                    "content": developer_content,
+                },
+                {
+                    "type": "message",
+                    "id": f"msg_{ids['env_msg_id']}",
+                    "role": "user",
+                    "content": plugins_content,
+                },
+            ],
+            "tools": tools,
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "reasoning": {"effort": effort},
+            "store": False,
+            "stream": True,
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": ids["session_id"],
+            "generate": False,
+            "client_metadata": self._client_metadata(ids, "prewarm"),
+        }
+        if tier:
+            frame["service_tier"] = tier
+        return frame
+
+    def _turn_frame(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        tier: str,
+        effort: str,
+        ids: dict[str, str],
+        previous_response_id: str,
+        turn_state: str,
+        turn_started_ms: int,
+        cwd: str,
+    ) -> dict[str, Any]:
+        tools = self._tools()
+        frame: dict[str, Any] = {
+            "type": "response.create",
+            "model": model,
+            "instructions": DESKTOP_BASE_INSTRUCTIONS,
+            "previous_response_id": previous_response_id,
+            "input": [
+                {
+                    "type": "message",
+                    "id": f"msg_{ids['user_msg_id']}",
                     "role": "user",
                     "content": [{"type": "input_text", "text": prompt}],
                 }
             ],
+            "tools": tools,
             "tool_choice": "auto",
             "parallel_tool_calls": True,
-            "reasoning": {"effort": "medium"},
+            "reasoning": {"effort": effort},
             "store": False,
             "stream": True,
-            "include": [],
-            "client_metadata": {
-                "session_id": ids["session_id"],
-                "thread_id": ids["thread_id"],
-                "turn_id": ids["turn_id"],
-            },
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": ids["session_id"],
+            "client_metadata": self._client_metadata(
+                ids,
+                "turn",
+                turn_started_ms=turn_started_ms,
+                turn_state=turn_state,
+            ),
+        }
+        if tier:
+            frame["service_tier"] = tier
+        return frame
+
+    async def _read_until_completed(
+        self,
+        ws: Any,
+        *,
+        order_id: str,
+        inventory_id: int,
+        deadline: float,
+        turn_state_holder: dict[str, str],
+        sent_turn: bool,
+    ) -> dict[str, Any]:
+        """读取事件直到 response.completed / response.failed。
+
+        ``sent_turn`` 为 True 时任何中断都返回 sent_unknown=True；
+        为 False（预热阶段）时中断会抛出异常由外层安全重连。
+        """
+        recv_idle = min(max(30.0, self._turn_timeout()), 300.0)
+        reply_parts: list[str] = []
+        completed = False
+        response_id = ""
+        while not completed:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                error = "WebSocket 等待回复超时"
+                if sent_turn:
+                    write_audit(
+                        "activation.ws_turn_timeout",
+                        order_id=order_id,
+                        inventory_id=inventory_id,
+                        payload={"reason": "turn_timeout"},
+                    )
+                    return result_dict(
+                        ok=False,
+                        error=f"{error}，发送结果未知",
+                        stage="turn_status_unknown",
+                        sent_unknown=True,
+                    )
+                raise asyncio.TimeoutError(error)
+            try:
+                message = await asyncio.wait_for(
+                    ws.recv(),
+                    timeout=min(recv_idle, remaining),
+                )
+            except asyncio.TimeoutError:
+                if sent_turn:
+                    write_audit(
+                        "activation.ws_turn_idle_timeout",
+                        order_id=order_id,
+                        inventory_id=inventory_id,
+                        payload={"reason": "idle_timeout"},
+                    )
+                    return result_dict(
+                        ok=False,
+                        error="WebSocket 等待回复超时，发送结果未知",
+                        stage="turn_status_unknown",
+                        sent_unknown=True,
+                    )
+                raise
+            except ConnectionClosed as exc:
+                if sent_turn:
+                    write_audit(
+                        "activation.ws_turn_connection_lost",
+                        order_id=order_id,
+                        inventory_id=inventory_id,
+                        payload={"error": str(exc)[:500]},
+                    )
+                    return result_dict(
+                        ok=False,
+                        error="WebSocket 在收到回复前断开，发送结果未知",
+                        stage="turn_status_unknown",
+                        sent_unknown=True,
+                    )
+                raise
+            if isinstance(message, (bytes, bytearray)):
+                continue
+            try:
+                event = json.loads(message)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("type") or "")
+            if kind == "response.created":
+                response = event.get("response") or {}
+                if isinstance(response, dict) and response.get("id"):
+                    response_id = str(response["id"])
+            elif kind == "response.metadata":
+                headers = event.get("headers") or {}
+                if isinstance(headers, dict):
+                    state = str(headers.get(X_CODEX_TURN_STATE) or "")
+                    if state:
+                        turn_state_holder["state"] = state
+            elif kind == "response.output_text.delta":
+                reply_parts.append(str(event.get("delta") or ""))
+            elif kind == "response.completed":
+                completed = True
+            elif kind in {"response.failed", "error"}:
+                error_info = event.get("error") or (
+                    (event.get("response") or {}).get("error")
+                )
+                if isinstance(error_info, dict):
+                    code = str(error_info.get("code") or "")
+                    message = str(error_info.get("message") or "")
+                else:
+                    code = ""
+                    message = str(event.get("error") or event)
+                status = event.get("status")
+                if status is not None:
+                    code = code or f"status_{status}"
+                raise _TurnRejected(code, message)
+        return {
+            "completed": True,
+            "response_id": response_id,
+            "reply": "".join(reply_parts).strip(),
         }
 
-    async def _run_turn(
+    async def _run_session(
         self,
         *,
         ws_url: str,
         headers: dict[str, str],
-        frame: dict[str, Any],
+        ids: dict[str, str],
+        model: str,
+        tier: str,
+        effort: str,
+        prompt: str,
         order_id: str,
         inventory_id: int,
+        cwd: str,
         report: Callable[[str], None],
     ) -> dict[str, Any]:
-        """连接、发送、读事件直到 response.completed / response.failed。
-
-        连接阶段（尚未发送）失败会抛出异常由外层重连；turn 已发出后的任何
-        中断都返回 ``sent_unknown=True`` 的结果，绝不重发。
-        """
+        """单次连接：预热帧 → 正式 turn 帧（同一连接复用）。"""
         connect_timeout = self._connect_timeout()
         turn_timeout = self._turn_timeout()
-        deadline = time.monotonic() + turn_timeout
-        recv_idle = min(max(30.0, turn_timeout), 300.0)
+        turn_state_holder: dict[str, str] = {}
+        proxy = self._proxy_url() or None
 
         async with websockets.connect(
             ws_url,
@@ -235,13 +543,61 @@ class CodexWsProvider:
             close_timeout=5,
             ping_interval=20,
             ping_timeout=20,
-            max_size=4 * 1024 * 1024,
+            max_size=8 * 1024 * 1024,
+            proxy=proxy,
         ) as ws:
+            # 握手响应头里也可能带 x-codex-turn-state
+            response = getattr(ws, "response", None)
+            if response is not None:
+                state = str(response.headers.get(X_CODEX_TURN_STATE) or "")
+                if state:
+                    turn_state_holder["state"] = state
+
+            # 1) 预热帧（generate:false）：服务端接受后返回 warm response id
+            warmup = self._warmup_frame(
+                model=model, tier=tier, effort=effort, ids=ids, cwd=cwd
+            )
+            report("switching_account")
+            try:
+                await asyncio.wait_for(
+                    ws.send(json.dumps(warmup, ensure_ascii=False)),
+                    timeout=connect_timeout,
+                )
+            except (asyncio.TimeoutError, ConnectionClosed):
+                # 预热帧未送达：整条会话还没产生任何用户可见内容，可安全重连
+                raise asyncio.TimeoutError("预热帧发送失败")
+
+            deadline = time.monotonic() + min(60.0, turn_timeout)
+            warm_result = await self._read_until_completed(
+                ws,
+                order_id=order_id,
+                inventory_id=inventory_id,
+                deadline=deadline,
+                turn_state_holder=turn_state_holder,
+                sent_turn=False,
+            )
+            if not warm_result.get("completed"):
+                raise asyncio.TimeoutError("预热阶段未完成")
+            previous_response_id = warm_result.get("response_id") or ""
+
+            # 2) 正式 turn 帧：previous_response_id 引用预热结果，同一连接复用
+            turn_started_ms = int(time.time() * 1000)
+            turn = self._turn_frame(
+                prompt=prompt,
+                model=model,
+                tier=tier,
+                effort=effort,
+                ids=ids,
+                previous_response_id=previous_response_id,
+                turn_state=turn_state_holder.get("state", ""),
+                turn_started_ms=turn_started_ms,
+                cwd=cwd,
+            )
             report("sending")
             try:
                 await asyncio.wait_for(
-                    ws.send(json.dumps(frame, ensure_ascii=False)),
-                    timeout=min(connect_timeout, max(1.0, deadline - time.monotonic())),
+                    ws.send(json.dumps(turn, ensure_ascii=False)),
+                    timeout=connect_timeout,
                 )
             except (asyncio.TimeoutError, ConnectionClosed) as exc:
                 write_audit(
@@ -258,93 +614,31 @@ class CodexWsProvider:
                 )
             report("waiting_response")
 
-            reply_parts: list[str] = []
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    write_audit(
-                        "activation.ws_turn_timeout",
-                        order_id=order_id,
-                        inventory_id=inventory_id,
-                        payload={"reason": "turn_timeout"},
-                    )
-                    return result_dict(
-                        ok=False,
-                        error="WebSocket 等待回复超时，发送结果未知",
-                        stage="turn_status_unknown",
-                        sent_unknown=True,
-                    )
-                try:
-                    message = await asyncio.wait_for(
-                        ws.recv(),
-                        timeout=min(recv_idle, remaining),
-                    )
-                except asyncio.TimeoutError:
-                    write_audit(
-                        "activation.ws_turn_idle_timeout",
-                        order_id=order_id,
-                        inventory_id=inventory_id,
-                        payload={"reason": "idle_timeout"},
-                    )
-                    return result_dict(
-                        ok=False,
-                        error="WebSocket 等待回复超时，发送结果未知",
-                        stage="turn_status_unknown",
-                        sent_unknown=True,
-                    )
-                except ConnectionClosed as exc:
-                    write_audit(
-                        "activation.ws_turn_connection_lost",
-                        order_id=order_id,
-                        inventory_id=inventory_id,
-                        payload={"error": str(exc)[:500]},
-                    )
-                    return result_dict(
-                        ok=False,
-                        error="WebSocket 在收到回复前断开，发送结果未知",
-                        stage="turn_status_unknown",
-                        sent_unknown=True,
-                    )
-                if isinstance(message, (bytes, bytearray)):
-                    continue
-                try:
-                    event = json.loads(message)
-                except (TypeError, json.JSONDecodeError):
-                    continue
-                if not isinstance(event, dict):
-                    continue
-                kind = str(event.get("type") or "")
-                if kind == "response.output_text.delta":
-                    reply_parts.append(str(event.get("delta") or ""))
-                elif kind == "response.completed":
-                    reply = "".join(reply_parts).strip()
-                    if not reply:
-                        return result_dict(
-                            ok=False,
-                            error="Codex 完成回复但未包含文本",
-                            stage="ws_no_reply",
-                            sent_unknown=False,
-                        )
-                    return result_dict(
-                        ok=True,
-                        reply=reply[:2000],
-                        stage="completed",
-                        sent_unknown=False,
-                    )
-                elif kind in {"response.failed", "error"}:
-                    error_info = event.get("error") or (
-                        (event.get("response") or {}).get("error")
-                    )
-                    if isinstance(error_info, dict):
-                        code = str(error_info.get("code") or "")
-                        message = str(error_info.get("message") or "")
-                    else:
-                        code = ""
-                        message = str(event.get("error") or event)
-                    status = event.get("status")
-                    if status is not None:
-                        code = code or f"status_{status}"
-                    raise _TurnRejected(code, message)
+            deadline = time.monotonic() + turn_timeout
+            turn_result = await self._read_until_completed(
+                ws,
+                order_id=order_id,
+                inventory_id=inventory_id,
+                deadline=deadline,
+                turn_state_holder=turn_state_holder,
+                sent_turn=True,
+            )
+            if not turn_result.get("completed"):
+                return turn_result
+            reply = turn_result.get("reply") or ""
+            if not reply:
+                return result_dict(
+                    ok=False,
+                    error="Codex 完成回复但未包含文本",
+                    stage="ws_no_reply",
+                    sent_unknown=False,
+                )
+            return result_dict(
+                ok=True,
+                reply=reply[:2000],
+                stage="completed",
+                sent_unknown=False,
+            )
 
     async def activate(
         self,
@@ -387,7 +681,7 @@ class CodexWsProvider:
                 provider="ws",
             )
 
-        model, model_error = await self._cached_model(
+        model, catalog_tier, catalog_effort, model_error = await self._cached_model(
             item, tokens.access_token, tokens.account_id
         )
         if not model:
@@ -404,6 +698,8 @@ class CodexWsProvider:
                 sent_unknown=False,
                 provider="ws",
             )
+        tier = self._service_tier() or catalog_tier
+        effort = self._reasoning_effort() or catalog_effort or "medium"
 
         base_url = self._base_url().rstrip("/")
         ws_url = f"{base_url}/responses"
@@ -412,19 +708,26 @@ class CodexWsProvider:
         elif ws_url.startswith("http://"):
             ws_url = "ws://" + ws_url[len("http://") :]
 
+        cwd = str(settings.database_path.parent)
         ids = {
-            "session_id": uuid.uuid4().hex,
-            "thread_id": uuid.uuid4().hex,
-            "turn_id": uuid.uuid4().hex,
+            "installation_id": self._installation_id(),
+            "session_id": _uuid7(),
+            "thread_id": _uuid7(),
+            "window_id": _uuid7(),
+            "turn_id": _uuid7(),
+            "dev_msg_id": _uuid7(),
+            "env_msg_id": _uuid7(),
+            "user_msg_id": _uuid7(),
         }
         headers = self._headers(
             tokens.access_token,
             tokens.account_id,
             model=model,
+            tier=tier,
             session_id=ids["session_id"],
             thread_id=ids["thread_id"],
+            window_id=ids["window_id"],
         )
-        frame = self._request_frame(prompt, model, ids)
 
         limit = self._reconnect_limit()
         last_error = ""
@@ -433,12 +736,17 @@ class CodexWsProvider:
                 delay = min(8.0, 0.5 * (2 ** (attempt - 2))) + random.uniform(0, 0.3)
                 await asyncio.sleep(delay)
             try:
-                result = await self._run_turn(
+                result = await self._run_session(
                     ws_url=ws_url,
                     headers=headers,
-                    frame=frame,
+                    ids=ids,
+                    model=model,
+                    tier=tier,
+                    effort=effort,
+                    prompt=prompt,
                     order_id=order_id,
                     inventory_id=inventory_id,
+                    cwd=cwd,
                     report=report,
                 )
                 result["provider"] = "ws"

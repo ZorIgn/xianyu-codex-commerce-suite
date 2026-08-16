@@ -25,9 +25,15 @@ ENV_FALLBACKS = {
     "desktop_background_mode": "DESKTOP_BACKGROUND_MODE",
     "desktop_allow_foreground_fallback": "DESKTOP_ALLOW_FOREGROUND_FALLBACK",
     "ws_base_url": "WS_BASE_URL",
+    "ws_proxy_url": "WS_PROXY_URL",
     "ws_model": "WS_MODEL",
     "ws_originator": "WS_ORIGINATOR",
+    "ws_client_version": "WS_CLIENT_VERSION",
     "ws_openai_beta": "WS_OPENAI_BETA",
+    "ws_service_tier": "WS_SERVICE_TIER",
+    "ws_reasoning_effort": "WS_REASONING_EFFORT",
+    "ws_installation_id": "WS_INSTALLATION_ID",
+    "ws_tools_json": "WS_TOOLS_JSON",
     "ws_reconnect_limit": "WS_RECONNECT_LIMIT",
     "ws_connect_timeout_seconds": "WS_CONNECT_TIMEOUT_SECONDS",
     "ws_turn_timeout_seconds": "WS_TURN_TIMEOUT_SECONDS",
@@ -73,9 +79,15 @@ def get_all_settings() -> dict[str, str]:
     data.setdefault("activation_worker_count", str(settings.activation_worker_count))
     data.setdefault("desktop_background_mode", "true" if settings.desktop_background_mode else "false")
     data.setdefault("ws_base_url", settings.ws_base_url)
+    data.setdefault("ws_proxy_url", settings.ws_proxy_url)
     data.setdefault("ws_model", settings.ws_model)
     data.setdefault("ws_originator", settings.ws_originator)
+    data.setdefault("ws_client_version", settings.ws_client_version)
     data.setdefault("ws_openai_beta", settings.ws_openai_beta)
+    data.setdefault("ws_service_tier", settings.ws_service_tier)
+    data.setdefault("ws_reasoning_effort", settings.ws_reasoning_effort)
+    data.setdefault("ws_installation_id", settings.ws_installation_id)
+    data.setdefault("ws_tools_json", settings.ws_tools_json)
     data.setdefault("ws_reconnect_limit", str(settings.ws_reconnect_limit))
     data.setdefault("ws_connect_timeout_seconds", str(settings.ws_connect_timeout_seconds))
     data.setdefault("ws_turn_timeout_seconds", str(settings.ws_turn_timeout_seconds))
@@ -107,9 +119,15 @@ def update_settings(values: dict[str, Any]) -> dict[str, str]:
         "desktop_background_mode",
         "desktop_allow_foreground_fallback",
         "ws_base_url",
+        "ws_proxy_url",
         "ws_model",
         "ws_originator",
+        "ws_client_version",
         "ws_openai_beta",
+        "ws_service_tier",
+        "ws_reasoning_effort",
+        "ws_installation_id",
+        "ws_tools_json",
         "ws_reconnect_limit",
         "ws_connect_timeout_seconds",
         "ws_turn_timeout_seconds",

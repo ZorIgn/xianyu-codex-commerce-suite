@@ -48,9 +48,15 @@ class Settings:
     desktop_background_mode: bool
     desktop_allow_foreground_fallback: bool
     ws_base_url: str
+    ws_proxy_url: str
     ws_model: str
     ws_originator: str
+    ws_client_version: str
     ws_openai_beta: str
+    ws_service_tier: str
+    ws_reasoning_effort: str
+    ws_installation_id: str
+    ws_tools_json: str
     ws_reconnect_limit: int
     ws_connect_timeout_seconds: int
     ws_turn_timeout_seconds: int
@@ -102,9 +108,15 @@ def get_settings() -> Settings:
         desktop_background_mode=_bool(os.getenv("DESKTOP_BACKGROUND_MODE"), False),
         desktop_allow_foreground_fallback=_bool(os.getenv("DESKTOP_ALLOW_FOREGROUND_FALLBACK"), False),
         ws_base_url=os.getenv("WS_BASE_URL", "https://chatgpt.com/backend-api/codex").strip(),
-        ws_model=os.getenv("WS_MODEL", "").strip(),
-        ws_originator=os.getenv("WS_ORIGINATOR", "codex_chatgpt_desktop").strip(),
+        ws_proxy_url=os.getenv("WS_PROXY_URL", "").strip(),
+        ws_model=os.getenv("WS_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna",
+        ws_originator=os.getenv("WS_ORIGINATOR", "Codex Desktop").strip(),
+        ws_client_version=os.getenv("WS_CLIENT_VERSION", "0.147.0-alpha.6.6").strip(),
         ws_openai_beta=os.getenv("WS_OPENAI_BETA", "responses_websockets=2026-02-06").strip(),
+        ws_service_tier=os.getenv("WS_SERVICE_TIER", "priority").strip(),
+        ws_reasoning_effort=os.getenv("WS_REASONING_EFFORT", "medium").strip(),
+        ws_installation_id=os.getenv("WS_INSTALLATION_ID", "").strip(),
+        ws_tools_json=os.getenv("WS_TOOLS_JSON", "").strip(),
         ws_reconnect_limit=max(1, int(os.getenv("WS_RECONNECT_LIMIT", "5"))),
         ws_connect_timeout_seconds=max(1, int(os.getenv("WS_CONNECT_TIMEOUT_SECONDS", "15"))),
         ws_turn_timeout_seconds=max(10, int(os.getenv("WS_TURN_TIMEOUT_SECONDS", "180"))),

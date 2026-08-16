@@ -425,9 +425,15 @@ async function loadSettings() {
   $("xianyuToken").value = data.xianyu_api_token || "";
   $("activationProvider").value = data.activation_provider || "desktop";
   $("wsBaseUrl").value = data.ws_base_url || "";
-  $("wsModel").value = data.ws_model || "";
-  $("wsOriginator").value = data.ws_originator || "codex_chatgpt_desktop";
+  $("wsProxyUrl").value = data.ws_proxy_url || "";
+  $("wsModel").value = data.ws_model || "gpt-5.6-luna";
+  $("wsOriginator").value = data.ws_originator || "Codex Desktop";
+  $("wsClientVersion").value = data.ws_client_version || "0.147.0-alpha.6.6";
+  $("wsServiceTier").value = data.ws_service_tier || "priority";
+  $("wsReasoningEffort").value = data.ws_reasoning_effort || "medium";
+  $("wsInstallationId").value = data.ws_installation_id || "";
   $("wsOpenaiBeta").value = data.ws_openai_beta || "responses_websockets=2026-02-06";
+  $("wsToolsJson").value = data.ws_tools_json || "";
   $("wsReconnectLimit").value = data.ws_reconnect_limit || "5";
   $("wsConnectTimeout").value = data.ws_connect_timeout_seconds || "15";
   $("wsTurnTimeout").value = data.ws_turn_timeout_seconds || "180";
@@ -598,9 +604,15 @@ function bindActions() {
       xianyu_api_token: $("xianyuToken").value.trim(),
       activation_provider: $("activationProvider").value,
       ws_base_url: $("wsBaseUrl").value.trim(),
+      ws_proxy_url: $("wsProxyUrl").value.trim(),
       ws_model: $("wsModel").value.trim(),
       ws_originator: $("wsOriginator").value.trim(),
+      ws_client_version: $("wsClientVersion").value.trim(),
+      ws_service_tier: $("wsServiceTier").value.trim(),
+      ws_reasoning_effort: $("wsReasoningEffort").value.trim(),
+      ws_installation_id: $("wsInstallationId").value.trim(),
       ws_openai_beta: $("wsOpenaiBeta").value.trim(),
+      ws_tools_json: $("wsToolsJson").value.trim(),
       ws_reconnect_limit: $("wsReconnectLimit").value || "5",
       ws_connect_timeout_seconds: $("wsConnectTimeout").value || "15",
       ws_turn_timeout_seconds: $("wsTurnTimeout").value || "180",

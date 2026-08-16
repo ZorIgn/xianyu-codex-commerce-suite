@@ -130,11 +130,17 @@
             <label>激活提供方 <select id="activationProvider"><option value="ws">Codex WebSocket 协议激活（无界面，实验性）</option><option value="desktop">ChatGPT/Codex 桌面端</option><option value="cli">Codex CLI 回退</option></select></label>
             <fieldset class="ws-settings">
               <legend>WebSocket 协议激活（实验性，暂未真实账号验证）</legend>
-              <small>不拉起桌面端，直接把“你好”装包成 Codex WebSocket 帧发送；断线最多重连 5 次，绝不走 HTTP。</small>
+              <small>不拉起桌面端，按真实 Codex Desktop 的 WS 会话链路发送“你好”（预热帧 + 正式 turn）；断线最多重连 5 次，绝不走 HTTP。</small>
               <label>Codex 后端地址 <input id="wsBaseUrl" placeholder="https://chatgpt.com/backend-api/codex" /></label>
-              <label>模型（留空自动从账号模型目录选择） <input id="wsModel" placeholder="留空自动" /></label>
-              <label>originator <input id="wsOriginator" placeholder="codex_chatgpt_desktop" /></label>
+              <label>WS 代理地址 <input id="wsProxyUrl" placeholder="http://127.0.0.1:7890" /></label>
+              <label>模型 <input id="wsModel" placeholder="gpt-5.6-luna" /></label>
+              <label>originator <input id="wsOriginator" placeholder="Codex Desktop" /></label>
+              <label>客户端版本 <input id="wsClientVersion" placeholder="0.147.0-alpha.6.6" /></label>
+              <label>service_tier <input id="wsServiceTier" placeholder="priority" /></label>
+              <label>reasoning effort <input id="wsReasoningEffort" placeholder="medium" /></label>
+              <label>installation id（留空自动生成并持久化） <input id="wsInstallationId" placeholder="自动生成" /></label>
               <label>OpenAI-Beta <input id="wsOpenaiBeta" placeholder="responses_websockets=2026-02-06" /></label>
+              <label>Tools JSON（留空用内置桌面风格工具声明） <textarea id="wsToolsJson" spellcheck="false" placeholder='[{"type":"function",...}]'></textarea></label>
               <label>WS 重连次数 <input id="wsReconnectLimit" type="number" min="1" max="20" value="5" /></label>
               <label>WS 连接超时（秒） <input id="wsConnectTimeout" type="number" min="1" max="120" value="15" /></label>
               <label>Turn 超时（秒） <input id="wsTurnTimeout" type="number" min="10" max="600" value="180" /></label>
