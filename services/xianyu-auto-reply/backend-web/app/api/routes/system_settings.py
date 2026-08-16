@@ -148,10 +148,6 @@ async def _refresh_log_retention_runtime(retention_days: int) -> dict:
         "scheduler": await _notify_log_retention_service(
             "Scheduler", settings.scheduler_service_url, retention_days,
         ),
-        "promotion_backend": {
-            "success": True,
-            "message": "返佣服务将通过自动同步任务应用最新日志保留天数",
-        },
     }
     return results
 

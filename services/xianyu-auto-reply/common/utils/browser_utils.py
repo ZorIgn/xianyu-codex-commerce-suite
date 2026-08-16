@@ -8,8 +8,7 @@ Playwright 浏览器工具模块
 4. 设置 PLAYWRIGHT_BROWSERS_PATH 环境变量
 5. 定位 Chromium 可执行文件路径
 
-此模块从 launcher.browser_setup 和 launcher.frozen_detect 提取，
-供 websocket、scheduler 等服务在打包后独立运行时使用。
+供 websocket、scheduler 等服务共享浏览器路径与环境检测能力。
 """
 from __future__ import annotations
 

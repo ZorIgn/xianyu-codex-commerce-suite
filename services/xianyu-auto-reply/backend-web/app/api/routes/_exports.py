@@ -10,7 +10,6 @@ from fastapi import APIRouter
 
 # 导入所有路由模块
 from . import (
-    activation,
     admin,
     advertisements,
     ai,
@@ -66,7 +65,6 @@ from . import (
     upload,
     user_settings,
     users,
-    version,
 )
 
 # 创建API路由器
@@ -78,9 +76,6 @@ api_router.include_router(health.router, tags=["健康检查"])  # 已定义pref
 # 注册所有路由
 # 注意：路由文件中已定义prefix的，这里不再重复添加prefix
 # 路由文件中未定义prefix的，在这里统一添加prefix
-
-# 激活码（公开接口，无需登录）
-api_router.include_router(activation.router, prefix="/activation", tags=["激活码"])
 
 # 认证相关
 api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
@@ -172,7 +167,6 @@ api_router.include_router(chat_new_image.router, tags=["在线聊天(新)图片�
 api_router.include_router(chat_quick_phrase.router, tags=["在线聊天(新)快捷短语"])  # 已定义prefix="/chat-new"
 api_router.include_router(chat_customer_order.router, tags=["在线聊天(新)客户订单"])  # 已定义prefix="/chat-new"
 # 版本检测（公开接口，无需登录即可查询版本信息）
-api_router.include_router(version.router, tags=["版本检测"])  # 已定义prefix="/version"
 
 
 __all__ = ["api_router"]

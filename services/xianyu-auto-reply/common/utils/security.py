@@ -39,7 +39,7 @@ def generate_secret_key(length: int = 32) -> str:
     return ''.join(secrets.choice(_SECRET_KEY_ALPHABET) for _ in range(length))
 
 
-# 已知的弱/占位 JWT 密钥（与 deploy.sh / update.sh 中的 WEAK_JWT_KEYS 保持一致）。
+# 已知的弱/占位 JWT 密钥。
 # 命中其一、或为空、或长度过短，均视为不安全，需要自动替换为随机值。
 WEAK_JWT_SECRETS: frozenset[str] = frozenset({
     "change-me",

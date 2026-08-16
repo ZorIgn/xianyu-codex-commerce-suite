@@ -1128,22 +1128,6 @@ class DatabaseInitializer:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='结算记录表';
         """,
 
-        # 36. 激活码生成日志表
-        "xy_activation_logs": """
-            CREATE TABLE IF NOT EXISTS xy_activation_logs (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-                machine_id VARCHAR(32) NOT NULL COMMENT '机器码',
-                code_type VARCHAR(20) NOT NULL COMMENT '类型：generate-获取激活码，renew-续期码',
-                generated_code VARCHAR(255) NOT NULL COMMENT '生成的激活码/续期码',
-                days INT NOT NULL COMMENT '有效天数',
-                ip_address VARCHAR(64) COMMENT '请求IP地址',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间（北京时间）',
-                INDEX idx_machine_id (machine_id),
-                INDEX idx_code_type (code_type),
-                INDEX idx_machine_type_time (machine_id, code_type, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='激活码生成日志表';
-        """,
-
         # 37. 商品素材库表
         "xy_product_materials": """
             CREATE TABLE IF NOT EXISTS xy_product_materials (

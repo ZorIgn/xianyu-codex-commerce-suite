@@ -11,6 +11,10 @@
 data/
 logs/
 run-logs/
+run-state/
+.cache/
+.docker/
+.playwright/
 backups/
 *.db
 *.sqlite
