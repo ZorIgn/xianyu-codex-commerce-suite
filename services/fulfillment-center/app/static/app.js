@@ -233,6 +233,12 @@ function updateInventorySelectAllState() {
   const boxes = [...document.querySelectorAll(".inventory-select")];
   const checked = boxes.filter(box => box.checked).length;
   const all = boxes.length > 0 && checked === boxes.length;
+  const count = $("selectedInventoryCount");
+  if (count) count.textContent = String(checked);
+  ["exportSelectedInventoryBtn", "bulkDeleteInventoryBtn"].forEach(id => {
+    const button = $(id);
+    if (button) button.disabled = checked === 0;
+  });
   ["selectAllInventory", "selectAllInventoryHeader"].forEach(id => {
     const box = $(id);
     if (box) {
@@ -240,6 +246,149 @@ function updateInventorySelectAllState() {
       box.indeterminate = checked > 0 && checked < boxes.length;
     }
   });
+}
+
+function downloadFilename(contentDisposition, format) {
+  const fallback = "inventory-" + format + ".json";
+  const header = contentDisposition || "";
+  const encoded = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  const plain = header.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+  let filename = fallback;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, "")); }
+    catch { filename = fallback; }
+  } else if (plain) {
+    filename = (plain[1] || plain[2] || "").trim();
+  }
+  return String(filename || fallback)
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .slice(0, 180) || fallback;
+}
+
+async function exportSelectedInventory(button) {
+  const ids = selectedInventoryIds();
+  if (!ids.length) return toast("请先选择要导出的库存");
+  const format = $("inventoryExportFormat").value;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "导出中";
+  try {
+    const response = await fetch("/inventory/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inventory_ids: ids, format }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let message = response.statusText || "导出失败";
+      try {
+        const data = text ? JSON.parse(text) : {};
+        message = data.detail || data.error || message;
+      } catch { /* Keep the status text; never render an untrusted response body. */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = downloadFilename(response.headers.get("Content-Disposition"), format);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    toast("已导出 " + ids.length + " 条账号");
+  } catch (err) {
+    toast("导出失败：" + err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+    updateInventorySelectAllState();
+  }
+}
+
+function resultCount(result, keys) {
+  for (const key of keys) {
+    const value = result?.[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (Array.isArray(value)) return value.length;
+  }
+  return null;
+}
+
+function summarizeBulkDeleteResult(result, requestedCount) {
+  const rows = Array.isArray(result?.results)
+    ? result.results
+    : Array.isArray(result?.details) ? result.details : [];
+  const derived = { deleted: 0, blocked: 0, failed: 0, skipped: 0, notFound: 0 };
+  rows.forEach(row => {
+    const action = String(row?.action || row?.status || "").toLowerCase();
+    if (row?.ok === true || row?.success === true || ["deleted", "success", "succeeded", "ok"].includes(action)) {
+      derived.deleted += 1;
+    } else if (["blocked", "delete_blocked"].includes(action)) {
+      derived.blocked += 1;
+    } else if (row?.not_found === true || ["not_found", "missing"].includes(action)) {
+      derived.notFound += 1;
+    } else if (row?.skipped === true || ["skipped", "skip"].includes(action)) {
+      derived.skipped += 1;
+    } else if (row?.ok === false || row?.failed === true || ["failed", "failure", "error"].includes(action)) {
+      derived.failed += 1;
+    }
+  });
+
+  const counts = {
+    deleted: resultCount(result, ["deleted", "success", "succeeded", "deleted_count", "success_count"]),
+    blocked: resultCount(result, ["blocked", "blocked_count"]),
+    failed: resultCount(result, ["failed", "failure", "errors", "failed_count", "failure_count", "fail"]),
+    skipped: resultCount(result, ["skipped", "skipped_count"]),
+    notFound: resultCount(result, ["not_found", "not_found_count", "missing", "missing_count"]),
+  };
+  Object.keys(counts).forEach(key => {
+    if (counts[key] === null && rows.length) counts[key] = derived[key];
+  });
+
+  const parts = ["请求 " + requestedCount + " 条"];
+  if (counts.deleted !== null) parts.push("已删除 " + counts.deleted + " 条");
+  if (counts.blocked !== null) parts.push("被阻止 " + counts.blocked + " 条");
+  if (counts.failed !== null) parts.push("失败 " + counts.failed + " 条");
+  if (counts.skipped !== null) parts.push("跳过 " + counts.skipped + " 条");
+  if (counts.notFound !== null) parts.push("未找到 " + counts.notFound + " 条");
+  return parts.join("，");
+}
+
+async function bulkDeleteInventory(button) {
+  const ids = selectedInventoryIds();
+  if (!ids.length) return toast("请先选择要删除的库存");
+  if (!window.confirm(
+    "确定永久删除已选择的 " + ids.length + " 条库存？\n\n" +
+    "会清理对应的已完成激活任务和履约明细，此操作不能撤销。"
+  )) return;
+
+  const originalLabel = button.textContent;
+  const status = $("bulkActionStatus");
+  button.disabled = true;
+  button.textContent = "删除中";
+  if (status) status.textContent = "正在删除 " + ids.length + " 条库存...";
+  try {
+    const result = await api("/inventory/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ inventory_ids: ids }),
+    });
+    const summary = summarizeBulkDeleteResult(result, ids.length);
+    if (status) status.textContent = "批量删除结果：" + summary;
+    toast("批量删除完成：" + summary);
+    try {
+      await refreshAll();
+    } catch (refreshErr) {
+      if (status) status.textContent += "；列表刷新失败：" + refreshErr.message;
+    }
+  } catch (err) {
+    if (status) status.textContent = "批量删除失败：" + err.message;
+    toast("批量删除失败：" + err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+    updateInventorySelectAllState();
+  }
 }
 
 async function cancelOAuthBatch(batchId, button) {
@@ -478,6 +627,11 @@ function selectedJsonFiles() {
   });
 }
 
+function importFailureCount(result) {
+  if (Array.isArray(result?.failed_files)) return result.failed_files.length;
+  return resultCount(result, ["failed", "failed_count", "errors"]) || 0;
+}
+
 function importSummary(result, includeFiles = false) {
   const parts = [];
   if (includeFiles) {
@@ -486,7 +640,8 @@ function importSummary(result, includeFiles = false) {
   parts.push("新增 " + (result.created || 0));
   parts.push("更新 " + (result.updated || 0));
   parts.push("未变化 " + (result.skipped || 0));
-  parts.push("失败 " + (result.failed_files?.length || 0));
+  if (result.ignored) parts.push("忽略 " + result.ignored);
+  parts.push("失败 " + importFailureCount(result));
   return parts.join("，");
 }
 
@@ -514,6 +669,8 @@ function bindActions() {
     startOAuthBatch(ids, "选中库存 OAuth 更新");
   });
   $("refreshAllOauthBtn").addEventListener("click", () => startOAuthBatch([], "全部库存 OAuth 更新"));
+  $("exportSelectedInventoryBtn").addEventListener("click", ev => exportSelectedInventory(ev.currentTarget));
+  $("bulkDeleteInventoryBtn").addEventListener("click", ev => bulkDeleteInventory(ev.currentTarget));
   $("statusFilter").addEventListener("change", loadInventory);
   $("searchInput").addEventListener("input", () => setTimeout(loadInventory, 120));
   $("auditRefreshBtn").addEventListener("click", loadAudit);
@@ -553,7 +710,7 @@ function bindActions() {
     try {
       const payload = $("importText").value.trim();
       if (!payload) throw new Error("请粘贴至少一条 JSON 库存");
-      const result = await api("/inventory/import-cpa", {
+      const result = await api("/inventory/import-json", {
         method: "POST",
         body: JSON.stringify({ payload, sync_cockpit: $("syncCockpit").checked }),
       });
@@ -569,7 +726,7 @@ function bindActions() {
     files.forEach(file => form.append("files", file, file.webkitRelativePath || file.name));
     form.append("sync_cockpit", $("syncCockpit").checked ? "true" : "false");
     try {
-      const result = await api("/inventory/import-cpa-files", { method: "POST", body: form });
+      const result = await api("/inventory/import-json-files", { method: "POST", body: form });
       showImportDetails(result, true);
       await refreshAll();
     } catch (err) { toast("文件导入失败：" + err.message); }

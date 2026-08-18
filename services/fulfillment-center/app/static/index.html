@@ -10,7 +10,7 @@
   <header class="topbar">
     <div>
       <h1>闲鱼卡密履约中心</h1>
-      <p>CPA 导入、库存出库、单实例排队激活、闲鱼发货绑定</p>
+      <p>账号 JSON 导入、库存出库、单实例排队激活、闲鱼发货绑定</p>
     </div>
     <div class="status-strip">
       <span>合格库存 <b id="eligibleCount">0</b></span>
@@ -54,22 +54,36 @@
             <button id="refreshSelectedOauthBtn">更新选中凭证</button>
             <button id="refreshAllOauthBtn" class="primary">一键更新全部凭证</button>
           </div>
+          <div class="bulk-toolbar inventory-bulk-toolbar" aria-label="库存批量工具">
+            <span class="selection-count" aria-live="polite">已选择 <b id="selectedInventoryCount">0</b> 条</span>
+            <label class="bulk-export-control">导出格式
+              <select id="inventoryExportFormat" aria-label="库存导出格式">
+                <option value="cockpit_tools">Cockpit Tools</option>
+                <option value="sub2api">Sub2API</option>
+                <option value="cpa">CPA</option>
+              </select>
+            </label>
+            <button id="exportSelectedInventoryBtn">导出选中</button>
+            <button id="bulkDeleteInventoryBtn" class="danger">批量删除</button>
+            <span id="bulkActionStatus" class="bulk-action-status" aria-live="polite"></span>
+          </div>
           <div id="oauthBatchStatus" class="oauth-batch-status"></div>
         </div>
 
         <div class="split">
           <div class="panel import-panel">
-            <h3>CPA JSON 导入</h3>
-            <textarea id="importText" spellcheck="false" placeholder="粘贴 CPA JSON。支持说明文字后连续多个对象、数组、{items: []}、{accounts: []}"></textarea>
+            <h3>账号 JSON 导入</h3>
+            <textarea id="importText" spellcheck="false" placeholder="粘贴账号 JSON。自动识别 CPA、Sub2API、Cockpit Tools/auth.json；支持数组、{items: []}、{accounts: []} 及连续对象。密码与 token 不会在页面显示、预览或打印。"></textarea>
+            <small class="import-support">自动识别 CPA、Sub2API、Cockpit Tools/auth.json。导入只处理账号数据，密码与 token 不在页面显示、预览或打印。</small>
             <div class="row between">
               <label class="check"><input id="syncCockpit" type="checkbox" /> 同步到 Cockpit/aBai</label>
               <button id="importBtn" class="primary">导入粘贴内容</button>
             </div>
             <div class="file-box">
-              <label>批量 JSON 文件 <input id="importFiles" type="file" accept=".json,application/json" multiple /></label>
-              <label>批量目录 <input id="importDir" type="file" accept=".json,application/json" multiple webkitdirectory /></label>
+              <label>多个 JSON 文件 <input id="importFiles" type="file" accept=".json,application/json" multiple /></label>
+              <label>JSON 目录 <input id="importDir" type="file" accept=".json,application/json" multiple webkitdirectory /></label>
               <button id="importFilesBtn" class="primary wide">导入选择的文件</button>
-              <small id="fileImportHint">支持一次选择很多个 CPA 单文件 JSON。</small>
+              <small id="fileImportHint">支持多文件与目录导入，自动识别 CPA、Sub2API、Cockpit Tools/auth.json。</small>
             </div>
           </div>
 

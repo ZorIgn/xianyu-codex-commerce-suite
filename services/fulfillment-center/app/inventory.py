@@ -9,6 +9,13 @@ from typing import Any
 from .audit import write_audit
 from .config import get_settings
 from .db import connect
+from .inventory_formats import (
+    AccountFormatError,
+    InventoryExportError,
+    build_inventory_export,
+    parse_account_json,
+    parse_account_payload,
+)
 from .settings_store import get_setting
 
 
@@ -111,28 +118,7 @@ def _json_values_from_text(text: str) -> list[Any]:
 
 
 def _items_from_cpa(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, str):
-        result: list[dict[str, Any]] = []
-        for value in _json_values_from_text(payload):
-            result.extend(_items_from_cpa(value))
-        if result:
-            return result
-        raise ValueError("没有识别到有效 CPA JSON 对象")
-    if isinstance(payload, list):
-        result: list[dict[str, Any]] = []
-        for value in payload:
-            if isinstance(value, dict):
-                result.extend(_items_from_cpa(value))
-            elif isinstance(value, (list, str)):
-                result.extend(_items_from_cpa(value))
-        return result
-    if isinstance(payload, dict):
-        for key in ("items", "accounts", "data", "rows"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return _items_from_cpa(value)
-        return [payload]
-    raise ValueError("CPA JSON 必须是对象、数组或包含多个对象的文本")
+    return parse_account_json(payload)
 
 
 def _credentials_dict(value: Any) -> dict[str, Any]:
@@ -163,7 +149,7 @@ def _credentials_dict(value: Any) -> dict[str, Any]:
 def _source_maps(raw: dict[str, Any]) -> list[dict[str, Any]]:
     """Return common CPA containers in precedence order."""
     sources: list[dict[str, Any]] = [raw]
-    for key in ("credentials", "tokens", "oauth", "auth"):
+    for key in ("credentials", "tokens", "oauth", "auth", "agent_identity"):
         value = raw.get(key)
         if isinstance(value, dict):
             sources.append(value)
@@ -452,7 +438,7 @@ def normalize_account(raw: dict[str, Any]) -> dict[str, Any]:
         "platform": platform,
         "email": email,
         "account_id": account_id,
-        "password": _text(_pick_sources(sources, "password", "pwd")),
+        "password": _text(_pick_sources(sources, "password", "pwd", "account_password")),
         "primary_token": oauth["access_token"],
         "id_token": oauth["id_token"],
         "session_token": _text(_pick_sources(sources, "session_token", "sessionToken")),
@@ -468,8 +454,9 @@ def normalize_account(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def import_cpa(payload: Any) -> dict[str, Any]:
-    items = [normalize_account(item) for item in _items_from_cpa(payload)]
+def _import_accounts(payload: Any, *, audit_event: str) -> dict[str, Any]:
+    parsed = parse_account_payload(payload)
+    items = [normalize_account(item) for item in parsed.accounts]
     created = 0
     updated = 0
     skipped = 0
@@ -576,12 +563,23 @@ def import_cpa(payload: Any) -> dict[str, Any]:
         "updated": updated,
         "skipped": skipped,
         "total": len(items),
+        "ignored": parsed.skipped,
+        "formats": list(parsed.detected_formats),
         "details": details,
         "details_truncated": len(items) > len(details),
     }
-    write_audit("inventory.import_cpa", payload=result)
+    write_audit(audit_event, payload=result)
     check_low_stock()
     return result
+
+
+def import_cpa(payload: Any) -> dict[str, Any]:
+    """Backward-compatible CPA entry point backed by the unified parser."""
+    return _import_accounts(payload, audit_event="inventory.import_cpa")
+
+
+def import_json(payload: Any) -> dict[str, Any]:
+    return _import_accounts(payload, audit_event="inventory.import_json")
 
 
 def desktop_oauth_status(row: dict[str, Any]) -> dict[str, Any]:
@@ -955,6 +953,33 @@ def get_inventory_item(inventory_id: int) -> dict[str, Any] | None:
     return _hydrate_inventory_item(dict(row)) if row else None
 
 
+def export_inventory_items(inventory_ids: list[int], format_name: str) -> Any:
+    """Build credentials only for an explicit selected-inventory download."""
+    if len(inventory_ids) > 1000:
+        raise InventoryExportError("一次最多导出 1000 个库存账号")
+    requested_ids = [int(value) for value in inventory_ids]
+    if not requested_ids:
+        raise InventoryExportError("请至少选择一个库存账号")
+    unique_ids = list(dict.fromkeys(requested_ids))
+    with connect() as conn:
+        rows_by_id = {
+            int(row["id"]): _hydrate_inventory_item(dict(row))
+            for row in conn.execute(
+                f"SELECT * FROM inventory_items WHERE id IN ({','.join('?' for _ in unique_ids)})",
+                tuple(unique_ids),
+            ).fetchall()
+        }
+    missing = next((inventory_id for inventory_id in unique_ids if inventory_id not in rows_by_id), None)
+    if missing is not None:
+        raise KeyError(f"库存不存在: {missing}")
+    return build_inventory_export([rows_by_id[inventory_id] for inventory_id in unique_ids], format_name)
+
+
+def export_inventory(inventory_ids: list[int], format_name: str) -> Any:
+    """Short alias used by API integrations."""
+    return export_inventory_items(inventory_ids, format_name)
+
+
 def delete_inventory_item(inventory_id: int) -> dict[str, Any]:
     inventory_id = int(inventory_id)
     with connect() as conn:
@@ -1010,6 +1035,41 @@ def delete_inventory_item(inventory_id: int) -> dict[str, Any]:
     write_audit("inventory.deleted", order_id=str(item.get("reserved_order_id") or ""), inventory_id=inventory_id, payload=result)
     check_low_stock()
     return result
+
+
+def bulk_delete_inventory_items(inventory_ids: list[int]) -> dict[str, Any]:
+    """Delete each requested ID independently and keep blocked IDs isolated."""
+    if len(inventory_ids) > 1000:
+        raise ValueError("一次最多删除 1000 个库存账号")
+    requested_ids = list(dict.fromkeys(int(value) for value in inventory_ids))
+    details: list[dict[str, Any]] = []
+    deleted = 0
+    blocked = 0
+    not_found = 0
+    failed = 0
+    for inventory_id in requested_ids:
+        try:
+            delete_inventory_item(inventory_id)
+        except InventoryDeleteBlocked:
+            blocked += 1
+            details.append({"inventory_id": inventory_id, "status": "blocked", "reason": "delete_blocked"})
+        except KeyError:
+            not_found += 1
+            details.append({"inventory_id": inventory_id, "status": "not_found", "reason": "inventory_not_found"})
+        except Exception:
+            failed += 1
+            details.append({"inventory_id": inventory_id, "status": "failed", "reason": "delete_failed"})
+        else:
+            deleted += 1
+            details.append({"inventory_id": inventory_id, "status": "deleted"})
+    return {
+        "requested": len(requested_ids),
+        "deleted": deleted,
+        "blocked": blocked,
+        "not_found": not_found,
+        "failed": failed,
+        "details": details,
+    }
 
 
 def manual_update_status(inventory_id: int, status: str, order_id: str = "") -> dict[str, Any]:

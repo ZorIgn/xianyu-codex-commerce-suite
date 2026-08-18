@@ -22,7 +22,7 @@
 | Backend Web | `http://127.0.0.1:8089` | Python | 管理后台 API；可打开 `/docs` 查看接口文档 |
 | 闲鱼 WebSocket | `http://127.0.0.1:8090` | Python | 保持闲鱼账号在线，接收聊天和付款事件，发送内部消息 |
 | Scheduler | `http://127.0.0.1:8091` | Python | 定时同步、补发与状态补偿 |
-| 本地履约中心 | `http://127.0.0.1:8765` | Python / FastAPI | CPA JSON 导入、库存筛选、按份出库、发货队列、激活队列与审计 |
+| 本地履约中心 | `http://127.0.0.1:8765` | Python / FastAPI | 多格式账号 JSON 导入导出、库存筛选、按份出库、发货队列、激活队列与审计 |
 | MySQL / Redis | `3306` / `6379` | Docker Compose | 订单、账号、队列和共享状态基础设施 |
 
 正常业务链路如下：
@@ -268,13 +268,15 @@ WebSocket 相关的模型、originator、客户端版本、service tier、reason
 
 ## 📦 商品、卡券与库存
 
-### 1. 导入 CPA JSON 库存
+### 1. 导入与管理账号 JSON 库存
 
-在 <http://127.0.0.1:8765> 左侧进入“库存”，使用“CPA JSON 导入”。当前支持：
+在 <http://127.0.0.1:8765> 左侧进入“库存”，使用“账号 JSON 导入”。系统会自动识别 CPA、Sub2API、Cockpit Tools、`auth.json` 和常见账号 JSON，当前支持：
 
 - 将单个或多个 JSON 对象粘贴到文本框。
 - 选择多个 JSON 文件批量导入。
 - 选择一个包含 JSON 文件的目录批量导入。
+- 勾选库存后批量导出为 Cockpit Tools、Sub2API 或 CPA 格式。
+- 勾选库存后批量删除；正在执行激活任务的库存会被跳过并明确列入阻止结果。
 
 导入后检查顶部的“合格库存”数量，并抽查邮箱、状态、有效性和 OAuth 字段。基础合格条件包括：
 
@@ -286,7 +288,7 @@ WebSocket 相关的模型、originator、客户端版本、service tier、reason
 | 未被其他订单锁定 | 不能已经被其他履约记录占用 |
 | 有可用账号标识 | 后续 WebSocket 激活需要可靠的 `account_id` |
 
-不同来源的 CPA JSON 字段可能不同。显示 `unknown` 或 `not_available` 的记录，可以尝试从 `access_token` claims 补出 `account_id` 和 expiry，再重新导入或更新并复核。claims 只能用于兼容提取，不能替代凭据有效性判断；一旦明确为 `expired`、`revoked` 或 `invalid`，或者最终仍无法推导 `account_id`，都不能正式激活。手动出库只会改变库存状态，不会凭空补齐缺失字段；正式使用前先用一条库存做端到端测试。
+不同来源的账号 JSON 字段可能不同。显示 `unknown` 或 `not_available` 的记录，可以尝试从 `access_token` claims 补出 `account_id` 和 expiry，再重新导入或更新并复核。claims 只能用于兼容提取，不能替代凭据有效性判断；一旦明确为 `expired`、`revoked` 或 `invalid`，或者最终仍无法推导 `account_id`，都不能正式激活。手动出库只会改变库存状态，不会凭空补齐缺失字段；正式使用前先用一条库存做端到端测试。
 
 不要直接删除已出库记录。它们关联订单、买家、激活和审计；确实需要测试数据清理时，先备份并确认不会造成同一账号重复发给不同买家。
 
@@ -582,7 +584,7 @@ Windows 主机营业期间不要自动睡眠。屏幕可以单独熄灭，但要
 
 ### 商品、卡券与库存
 
-- [ ] CPA JSON 已导入，合格库存数量足够。
+- [ ] 账号 JSON 已导入，合格库存数量足够；需要迁移时已验证目标导出格式。
 - [ ] 正式库存没有无法解释的 `unknown`、`not_available` 或缺失账号标识。
 - [ ] 每个正式商品已同步到商品管理。
 - [ ] 每个正式商品已关联同一启用的本地履约卡券。

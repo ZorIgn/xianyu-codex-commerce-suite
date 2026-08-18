@@ -19,6 +19,7 @@ body {
   background: var(--bg);
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
   letter-spacing: 0;
+  overflow-x: hidden;
 }
 button, input, select, textarea { font: inherit; }
 button {
@@ -31,6 +32,7 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
+button:disabled { cursor: not-allowed; opacity: .58; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.danger { color: var(--danger); }
 button.wide { width: 100%; }
@@ -86,6 +88,7 @@ p { color: var(--muted); font-size: 13px; margin-top: 5px; }
 }
 .split { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 14px; align-items: start; }
 .import-panel textarea { width: 100%; min-height: 320px; }
+.import-support { display: block; color: var(--muted); line-height: 1.5; margin: 8px 0 12px; }
 .row { display: flex; gap: 10px; align-items: center; }
 .between { justify-content: space-between; }
 .end { justify-content: flex-end; }
@@ -94,6 +97,8 @@ p { color: var(--muted); font-size: 13px; margin-top: 5px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 10px 8px; vertical-align: top; }
 th { background: #f2ede4; color: #4d473f; position: sticky; top: 0; }
+.table-panel { min-width: 0; max-width: 100%; overflow-x: auto; }
+.table-panel table { min-width: 940px; }
 .actions { display: flex; flex-wrap: wrap; gap: 4px; min-width: 270px; }
 .badge { display: inline-block; border-radius: 99px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); }
 .badge.available { color: var(--ok); background: #eef8ed; }
@@ -178,6 +183,8 @@ pre {
   .nav { width: auto; white-space: nowrap; }
   .split, .ship-grid, .settings-grid { grid-template-columns: 1fr; }
   .section-head { flex-direction: column; }
+  .inventory-bulk-toolbar .bulk-action-status { flex-basis: 100%; }
+  .row.between { align-items: stretch; }
 }
 .file-box {
   border-top: 1px solid var(--line);
@@ -209,6 +216,17 @@ pre {
   flex-wrap: wrap;
   margin-top: 10px;
 }
+.inventory-bulk-toolbar { min-width: 0; }
+.selection-count { min-width: 7em; white-space: nowrap; color: var(--muted); font-size: 13px; }
+.bulk-export-control { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.bulk-export-control select { min-width: 150px; }
+.bulk-action-status {
+  flex: 1 1 220px;
+  min-width: 180px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 .oauth-batch-status {
   color: var(--muted);
   font-size: 13px;
@@ -221,4 +239,21 @@ pre {
   min-height: 120px;
   width: 100%;
   resize: vertical;
+}
+@media (max-width: 600px) {
+  .topbar { padding: 14px 12px; }
+  .workspace { padding: 12px; }
+  .panel { padding: 12px; }
+  h1 { font-size: 20px; }
+  .status-strip { gap: 6px; }
+  .status-strip span { min-width: 100px; padding: 7px 9px; }
+  .filters { width: 100%; }
+  .filters > * { flex: 1 1 100%; min-width: 0; }
+  .inventory-bulk-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .inventory-bulk-toolbar .selection-count,
+  .inventory-bulk-toolbar .bulk-action-status { grid-column: 1 / -1; }
+  .inventory-bulk-toolbar .bulk-export-control { min-width: 0; }
+  .inventory-bulk-toolbar .bulk-export-control select { min-width: 0; width: 100%; }
+  .inventory-bulk-toolbar button { width: 100%; }
+  .row.between > * { flex: 1 1 100%; }
 }

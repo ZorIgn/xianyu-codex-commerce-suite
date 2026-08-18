@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -53,13 +53,17 @@ from .fulfillment import (
 from .inventory import (
     InventoryDeleteBlocked,
     _items_from_cpa,
+    bulk_delete_inventory_items,
     delete_inventory_item,
+    export_inventory_items,
     import_cpa,
+    import_json,
     list_inventory,
     manual_update_status,
     normalize_account,
     summary,
 )
+from .inventory_formats import AccountFormatError, InventoryExportError
 from .oauth_reauth import (
     OAuthReauthError,
     automatic_reauthorize_inventory_oauth_retry,
@@ -77,6 +81,20 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 class ImportCpaRequest(BaseModel):
     payload: Any
     sync_cockpit: bool = False
+
+
+class ImportJsonRequest(BaseModel):
+    payload: Any
+    sync_cockpit: bool = False
+
+
+class InventoryExportRequest(BaseModel):
+    inventory_ids: list[int] = Field(default_factory=list, max_length=1000)
+    format: str = Field(min_length=1)
+
+
+class InventoryBulkDeleteRequest(BaseModel):
+    inventory_ids: list[int] = Field(default_factory=list, max_length=1000)
 
 
 class OrderPaidRequest(BaseModel):
@@ -203,10 +221,25 @@ def health() -> dict[str, Any]:
 
 @app.post("/inventory/import-cpa")
 async def import_inventory(body: ImportCpaRequest) -> dict[str, Any]:
-    result = import_cpa(body.payload)
+    try:
+        result = import_cpa(body.payload)
+    except AccountFormatError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if body.sync_cockpit:
         result["cockpit"] = await CockpitAdapter().import_accounts(_cockpit_lines_from_payload(body.payload))
     write_audit("api.inventory.import_cpa", payload={"result": result, "sync_cockpit": body.sync_cockpit})
+    return result
+
+
+@app.post("/inventory/import-json")
+async def import_inventory_json(body: ImportJsonRequest) -> dict[str, Any]:
+    try:
+        result = import_json(body.payload)
+    except AccountFormatError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if body.sync_cockpit:
+        result["cockpit"] = await CockpitAdapter().import_accounts(_cockpit_lines_from_payload(body.payload))
+    write_audit("api.inventory.import_json", payload={"result": result, "sync_cockpit": body.sync_cockpit})
     return result
 
 
@@ -249,6 +282,97 @@ async def import_inventory_files(
         result["cockpit"] = await CockpitAdapter().import_accounts(lines)
     write_audit("api.inventory.import_cpa_files", payload={"result": result, "sync_cockpit": sync_cockpit})
     return result
+
+
+@app.post("/inventory/import-json-files")
+async def import_inventory_json_files(
+    files: list[UploadFile] = File(...),
+    sync_cockpit: bool = False,
+) -> dict[str, Any]:
+    payloads: list[Any] = []
+    failed: list[dict[str, str]] = []
+    result: dict[str, Any] = {
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "total": 0,
+        "ignored": 0,
+        "formats": [],
+        "details": [],
+        "details_truncated": False,
+    }
+    for file in files:
+        name = file.filename or "unnamed.json"
+        if not name.lower().endswith(".json"):
+            failed.append({"file": name, "error": "not a json file"})
+            continue
+        try:
+            raw = await file.read()
+            payload = raw.decode("utf-8-sig")
+            imported = import_json(payload)
+        except Exception as exc:
+            failed.append({"file": name, "error": str(exc)})
+            continue
+        payloads.append(payload)
+        for key in ("created", "updated", "skipped", "total", "ignored"):
+            result[key] += int(imported.get(key) or 0)
+        for format_name in imported.get("formats", []):
+            if format_name not in result["formats"]:
+                result["formats"].append(format_name)
+        remaining = max(0, 200 - len(result["details"]))
+        result["details"].extend((imported.get("details") or [])[:remaining])
+        result["details_truncated"] = bool(
+            result["details_truncated"]
+            or imported.get("details_truncated")
+            or len(imported.get("details") or []) > remaining
+        )
+    result["files"] = len(files)
+    result["parsed_files"] = len(payloads)
+    result["failed_files"] = failed + result.get("failed_files", [])
+    if sync_cockpit and payloads and not result["failed_files"]:
+        lines: list[str] = []
+        for payload in payloads:
+            lines.extend(_cockpit_lines_from_payload(payload))
+        result["cockpit"] = await CockpitAdapter().import_accounts(lines)
+    write_audit("api.inventory.import_json_files", payload={"result": result, "sync_cockpit": sync_cockpit})
+    return result
+
+
+@app.post("/inventory/export")
+@app.post("/inventory/bulk-export")
+def inventory_export(body: InventoryExportRequest) -> Response:
+    try:
+        payload = export_inventory_items(body.inventory_ids, body.format)
+    except InventoryExportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        message = str(exc.args[0]) if exc.args else "库存不存在"
+        raise HTTPException(404, message) from exc
+    content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    format_name = body.format.strip().lower().replace("-", "_")
+    inventory_ids = list(dict.fromkeys(int(value) for value in body.inventory_ids))
+    write_audit(
+        "api.inventory.export",
+        payload={
+            "format": format_name,
+            "count": len(inventory_ids),
+            "inventory_ids": inventory_ids,
+        },
+    )
+    filename = f"inventory_{format_name}.json"
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/inventory/bulk-delete")
+def inventory_bulk_delete(body: InventoryBulkDeleteRequest) -> dict[str, Any]:
+    try:
+        return bulk_delete_inventory_items(body.inventory_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/inventory")
