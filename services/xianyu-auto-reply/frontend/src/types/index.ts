@@ -34,6 +34,8 @@ export interface LoginResponse {
   username?: string
   is_admin?: boolean
   account_limit?: number | null
+  requires_password_setup?: boolean
+  requires_local_reset?: boolean
 }
 
 // 账号相关类型

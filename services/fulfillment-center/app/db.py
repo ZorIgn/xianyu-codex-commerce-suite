@@ -16,8 +16,10 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     external_id TEXT UNIQUE,
     platform TEXT NOT NULL DEFAULT 'chatgpt',
     email TEXT NOT NULL DEFAULT '',
+    account_id TEXT NOT NULL DEFAULT '',
     password TEXT NOT NULL DEFAULT '',
     primary_token TEXT NOT NULL DEFAULT '',
+    id_token TEXT NOT NULL DEFAULT '',
     session_token TEXT NOT NULL DEFAULT '',
     refresh_token TEXT NOT NULL DEFAULT '',
     cookies TEXT NOT NULL DEFAULT '',
@@ -25,6 +27,7 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     validity_status TEXT NOT NULL DEFAULT 'unknown',
     display_status TEXT NOT NULL DEFAULT 'registered',
     token_revoked INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL DEFAULT '',
     reset_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'available',
     source_payload TEXT NOT NULL DEFAULT '{}',
@@ -281,11 +284,11 @@ DEFAULT_SETTINGS = {
     "desktop_app_user_data_dir": "",
     "desktop_launch_command": "",
     "desktop_instance_pool": "",
-    "activation_worker_count": "3",
+    "activation_worker_count": "1",
     "desktop_background_mode": "false",
     "oauth_reauth_retry_limit": "3",
     "oauth_reauth_retry_delay_seconds": "2",
-    "delivery_worker_count": "6",
+    "delivery_worker_count": "1",
     "delivery_retry_limit": "5",
     "oauth_reauth_retry_delays": "2,5,10",
     "delivery_retry_base_seconds": "1",
@@ -319,6 +322,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     add_column("inventory_items", "activated_at", "TEXT")
     add_column("inventory_items", "activation_error", "TEXT NOT NULL DEFAULT ''")
     add_column("inventory_items", "codex_reply", "TEXT NOT NULL DEFAULT ''")
+    add_column("inventory_items", "account_id", "TEXT NOT NULL DEFAULT ''")
+    add_column("inventory_items", "id_token", "TEXT NOT NULL DEFAULT ''")
+    add_column("inventory_items", "expires_at", "TEXT NOT NULL DEFAULT ''")
     add_column("fulfillments", "quantity", "INTEGER NOT NULL DEFAULT 1")
     add_column("fulfillments", "chat_id", "TEXT NOT NULL DEFAULT ''")
     add_column("fulfillments", "account_id", "TEXT NOT NULL DEFAULT ''")

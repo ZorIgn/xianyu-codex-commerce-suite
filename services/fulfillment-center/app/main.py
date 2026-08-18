@@ -148,6 +148,8 @@ def _cockpit_lines_from_payload(payload: Any) -> list[str]:
         if not item["email"]:
             continue
         extra = {
+            "account_id": item["account_id"],
+            "expires_at": item["expires_at"],
             "primary_token": item["primary_token"],
             "session_token": item["session_token"],
             "refresh_token": item["refresh_token"],

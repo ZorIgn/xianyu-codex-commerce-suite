@@ -442,7 +442,7 @@ async function loadSettings() {
   $("desktopProfileDir").value = data.desktop_profile_dir || "";
   $("desktopAppUserDataDir").value = data.desktop_app_user_data_dir || "";
   $("desktopLaunchCommand").value = data.desktop_launch_command || "";
-  $("activationWorkerCount").value = data.activation_worker_count || "3";
+  $("activationWorkerCount").value = data.activation_worker_count || "1";
   $("desktopInstancePool").value = data.desktop_instance_pool || "";
   $("desktopBackgroundMode").checked = ["1", "true", "yes", "on"].includes(String(data.desktop_background_mode || "").toLowerCase());
   $("desktopAllowForegroundFallback").checked = ["1", "true", "yes", "on"].includes(String(data.desktop_allow_foreground_fallback || "").toLowerCase());
@@ -621,7 +621,7 @@ function bindActions() {
       desktop_profile_dir: $("desktopProfileDir").value.trim(),
       desktop_app_user_data_dir: $("desktopAppUserDataDir").value.trim(),
       desktop_launch_command: $("desktopLaunchCommand").value.trim(),
-      activation_worker_count: $("activationWorkerCount").value || "3",
+      activation_worker_count: $("activationWorkerCount").value || "1",
       desktop_instance_pool: $("desktopInstancePool").value.trim(),
       desktop_background_mode: $("desktopBackgroundMode").checked ? "true" : "false",
       desktop_allow_foreground_fallback: $("desktopAllowForegroundFallback").checked ? "true" : "false",

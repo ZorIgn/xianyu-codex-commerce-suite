@@ -14,6 +14,7 @@ from ..audit import write_audit
 from ..config import get_settings
 from ..db import connect
 from ..inventory import (
+    activation_eligibility,
     get_inventory_item,
     mark_activated,
     mark_activation_failed,
@@ -882,11 +883,6 @@ class ActivationQueueManager:
                         )
                     continue
 
-                mark_activation_started(
-                    int(job["inventory_id"]),
-                    str(job["order_id"]),
-                    str(job["id"]),
-                )
                 if _reauth_before_activation_enabled():
                     refreshed_item, reauth_error = await self._reauthorize_before_activation(job)
                     if reauth_error:
@@ -908,6 +904,32 @@ class ActivationQueueManager:
                             )
                         continue
                     item = refreshed_item or item
+                eligible, eligibility_reason = activation_eligibility(item)
+                if not eligible:
+                    error = f"库存不可正式激活: {eligibility_reason}"
+                    mark_activation_failed(
+                        int(job["inventory_id"]),
+                        str(job["order_id"]),
+                        error,
+                    )
+                    with connect() as conn:
+                        conn.execute(
+                            """
+                            UPDATE activation_jobs
+                            SET status = 'failed', stage = 'ineligible',
+                                error_message = ?, lease_owner = '',
+                                lease_expires_at = NULL,
+                                finished_at = datetime('now'), updated_at = datetime('now')
+                            WHERE id = ?
+                            """,
+                            (error[:2000], int(job["id"])),
+                        )
+                    continue
+                mark_activation_started(
+                    int(job["inventory_id"]),
+                    str(job["order_id"]),
+                    str(job["id"]),
+                )
                 result: dict[str, Any] = {}
                 attempts = max(
                     1,

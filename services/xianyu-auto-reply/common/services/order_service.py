@@ -531,6 +531,84 @@ class OrderService:
             await self.session.rollback()
             return False
 
+    async def update_order_payment_guard(
+        self,
+        order_no: str,
+        guard_state: dict,
+        *,
+        fail_reason: str | None = None,
+        clear_fail_reason: bool = False,
+        terminal_status: str | None = None,
+    ) -> bool:
+        """Persist the bounded payment/amount gate state on the order.
+
+        The existing order ``metadata`` JSON column is used so deployments do
+        not need a schema migration for a small, operational retry record.
+        The update reads and merges the JSON document to preserve unrelated
+        metadata written by other order workflows.
+        """
+        try:
+            from common.services.order_payment_guard import PAYMENT_GUARD_METADATA_KEY
+
+            # Serialize the JSON read/merge/write so two payment events cannot
+            # overwrite each other's attempt counter or unrelated metadata.
+            stmt = (
+                select(XYOrder)
+                .where(XYOrder.order_no == order_no)
+                .with_for_update()
+            )
+            result = await self.session.execute(stmt)
+            order = result.scalars().first()
+            if not order:
+                return False
+
+            metadata = dict(order.metadata_json or {})
+            current_state = metadata.get(PAYMENT_GUARD_METADATA_KEY)
+            incoming_state = dict(guard_state or {})
+            if isinstance(current_state, dict):
+                current_state_name = current_state.get("state")
+                incoming_state_name = incoming_state.get("state")
+                try:
+                    current_attempt = int(current_state.get("attempt", 0))
+                    incoming_attempt = int(incoming_state.get("attempt", 0))
+                except (TypeError, ValueError):
+                    current_attempt = incoming_attempt = 0
+                # A stale retry result must not reopen a ready/terminal order,
+                # and duplicate same-attempt retry writes should keep the
+                # already persisted state.
+                if current_state_name == "stopped":
+                    # A terminal decision is immutable for this order. A
+                    # delayed ready/retry result must not reopen delivery.
+                    incoming_state = dict(current_state)
+                elif current_state_name == "ready" and incoming_state_name == "retrying":
+                    incoming_state = dict(current_state)
+                elif (
+                    current_state_name == "retrying"
+                    and incoming_state_name == "retrying"
+                    and current_attempt >= incoming_attempt
+                ):
+                    incoming_state = dict(current_state)
+            metadata[PAYMENT_GUARD_METADATA_KEY] = incoming_state
+            values = {"metadata_json": metadata}
+            effective_state_name = incoming_state.get("state")
+            if clear_fail_reason and effective_state_name == "ready":
+                values["delivery_fail_reason"] = None
+            elif fail_reason is not None and effective_state_name != "ready":
+                values["delivery_fail_reason"] = (
+                    fail_reason[:1997] + "..." if len(fail_reason) > 2000 else fail_reason
+                )
+            if terminal_status:
+                values["status"] = terminal_status
+
+            update_stmt = update(XYOrder).where(XYOrder.id == order.id).values(**values)
+            await self.session.execute(update_stmt)
+            await self.session.commit()
+            return True
+        except Exception as e:
+            logger.error(f"持久化订单付款状态失败: order_no={order_no}, error={e}")
+            await self.session.rollback()
+            return False
+
     async def create_order_from_message(
         self,
         order_no: str,
@@ -1753,6 +1831,38 @@ class OrderStatusChecker:
                             'reason': '订单已关闭',
                             'order_status': order_status_title
                         }
+                    elif '退款' in order_status_title:
+                        return {
+                            'success': True,
+                            'can_ship': False,
+                            'reason': '订单已退款或正在退款',
+                            'order_status': order_status_title
+                        }
+                    elif '取消' in order_status_title:
+                        await self._update_order_status_to_cancelled(order_id)
+                        return {
+                            'success': True,
+                            'can_ship': False,
+                            'reason': '订单已取消',
+                            'order_status': order_status_title
+                        }
+                    elif any(
+                        phrase in order_status_title.lower()
+                        for phrase in (
+                            '交易失败',
+                            '支付失败',
+                            '付款失败',
+                            'transaction failed',
+                            'payment failed',
+                            'trade failed',
+                        )
+                    ):
+                        return {
+                            'success': True,
+                            'can_ship': False,
+                            'reason': '交易或支付已失败',
+                            'order_status': order_status_title
+                        }
                     elif '交易成功' in order_status_title:
                         return {
                             'success': True,
@@ -2085,7 +2195,30 @@ class OrderStatusChecker:
             if completed:
                 current_status_parts.append(title)
         order_status = ' → '.join(current_status_parts) if current_status_parts else '未知'
-        
+
+        # 终态优先于“已付款”判断。退款、关闭、取消和失败订单可能仍
+        # 带有历史“已付款”节点，不能因为该节点存在而进入发货流程。
+        titles = [str(node.get('title', '') or '') for node in status_nodes]
+        title_text = ' '.join(titles)
+        if '退款' in title_text:
+            return False, '订单已退款或正在退款', order_status
+        if '关闭' in title_text:
+            return False, '订单已关闭', order_status
+        if '取消' in title_text:
+            return False, '订单已取消', order_status
+        if any(
+            phrase in title_text.lower()
+            for phrase in (
+                '交易失败',
+                '支付失败',
+                '付款失败',
+                'transaction failed',
+                'payment failed',
+                'trade failed',
+            )
+        ):
+            return False, '交易或支付已失败', order_status
+
         # 检查是否已付款
         is_paid = status_map.get('已付款', False)
         if not is_paid:

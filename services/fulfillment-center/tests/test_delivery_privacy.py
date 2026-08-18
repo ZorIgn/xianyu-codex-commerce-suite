@@ -20,7 +20,12 @@ class DeliveryPrivacyTest(unittest.TestCase):
         text = render_delivery_text(
             [
                 {"email": "one@example.com", "password": "secret-one"},
-                {"email": "two@example.com", "password": "secret-two"},
+                {
+                    "email": "two@example.com",
+                    "password": "secret-two",
+                    "primary_token": "access-token-two",
+                    "refresh_token": "refresh-token-two",
+                },
             ]
         )
 
@@ -28,4 +33,6 @@ class DeliveryPrivacyTest(unittest.TestCase):
         self.assertIn("two@example.com", text)
         self.assertNotIn("secret-one", text)
         self.assertNotIn("secret-two", text)
+        self.assertNotIn("access-token-two", text)
+        self.assertNotIn("refresh-token-two", text)
         self.assertNotIn("密码", text)

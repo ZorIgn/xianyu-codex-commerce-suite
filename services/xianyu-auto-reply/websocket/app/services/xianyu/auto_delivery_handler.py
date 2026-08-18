@@ -14,6 +14,7 @@ import json
 import os
 import time
 import hashlib
+from collections import defaultdict
 import aiohttp
 from loguru import logger
 
@@ -49,6 +50,11 @@ class AutoDeliveryHandler:
         # - card_type:   text / data / image / api / yifan_api，固定内容类（text/image）需退化为 1 张避免重复发同样内容
         self._last_delivery_card_source = None
         self._last_delivery_card_type = None
+        # Payment/amount refreshes are bounded and persisted per order.  The
+        # local lock prevents two payment events in this process from
+        # advancing the same retry counter twice.
+        self._payment_guard_locks = defaultdict(asyncio.Lock)
+        self._payment_retry_tasks = {}
     
     # ==================== 属性代理 ====================
     
@@ -503,7 +509,13 @@ class AutoDeliveryHandler:
     async def _delayed_lock_release(self, lock_key: str, delay_minutes: int = 10):
         return await self.parent._delayed_lock_release(lock_key, delay_minutes)
     
-    async def fetch_order_detail_info(self, order_id: str, item_id: str = None, buyer_id: str = None):
+    async def fetch_order_detail_info(
+        self,
+        order_id: str,
+        item_id: str = None,
+        buyer_id: str = None,
+        force_refresh: bool = False,
+    ):
         """获取订单详情信息，并同步更新到数据库
         
         获取逻辑（参照旧框架）：
@@ -533,12 +545,12 @@ class AutoDeliveryHandler:
                     }
                     
                     # 如果数据库中已有规格信息，直接返回
-                    if result.get('spec_name') and result.get('spec_value'):
+                    if not force_refresh and result.get('spec_name') and result.get('spec_value'):
                         logger.info(f"【{self.cookie_id}】订单 {order_id} 从数据库获取规格信息: {result['spec_name']}={result['spec_value']}")
                         return result
                 
-                # 数据库中没有规格信息，通过API获取
-                logger.info(f"【{self.cookie_id}】订单 {order_id} 数据库无规格信息，尝试通过API获取...")
+                # 数据库中没有规格信息，或付款金额安全门要求强制刷新时，通过API获取
+                logger.info(f"【{self.cookie_id}】订单 {order_id} {'强制刷新' if force_refresh else '数据库无规格信息'}，尝试通过API获取...")
                 api_result = await self._fetch_order_detail_from_api(order_id)
                 
                 if api_result:
@@ -701,7 +713,7 @@ class AutoDeliveryHandler:
                     
                     # 获取价格
                     price = item_info.get('price', '')
-                    if price:
+                    if price is not None and str(price).strip() != '':
                         result['amount'] = str(price)
                     
                     # 获取规格信息（格式：规格名:规格值）
@@ -837,12 +849,440 @@ class AutoDeliveryHandler:
         self.last_delivery_time[order_id] = current_time
         logger.info(f"【{self.cookie_id}】订单 {order_id} 已标记为发货（冷却期已设置）")
 
+    # ==================== 付款金额安全门 ====================
+
+    def _payment_guard_config(self) -> tuple[int, float, float]:
+        """Read bounded payment refresh settings without allowing infinity."""
+        from common.services.order_payment_guard import normalize_retry_config
+
+        return normalize_retry_config(
+            os.getenv("AUTO_DELIVERY_PAYMENT_MAX_ATTEMPTS", "4"),
+            os.getenv("AUTO_DELIVERY_PAYMENT_RETRY_BASE_SECONDS", "1"),
+            os.getenv("AUTO_DELIVERY_PAYMENT_RETRY_MAX_SECONDS", "8"),
+        )
+
+    def _payment_retry_context(
+        self,
+        *,
+        item_id: str | None,
+        buyer_id: str | None,
+        chat_id: str | None,
+        send_user_name: str | None,
+    ) -> dict[str, str]:
+        """Return only non-secret identifiers needed to resume a retry."""
+        return {
+            "item_id": str(item_id or ""),
+            "buyer_id": str(buyer_id or ""),
+            "chat_id": str(chat_id or ""),
+            "send_user_name": str(send_user_name or ""),
+        }
+
+    async def _persist_payment_guard_state(
+        self,
+        order_id: str,
+        state: dict,
+        *,
+        terminal_status: str | None = None,
+    ) -> bool:
+        """Persist retry audit state and a compatible human-readable reason."""
+        try:
+            from common.db.session import async_session_maker
+            from common.services.order_payment_guard import format_guard_reason
+            from common.services.order_service import OrderService
+
+            state_name = state.get("state")
+            fail_reason = format_guard_reason(state) if state_name in ("retrying", "stopped") else None
+            async with async_session_maker() as session:
+                return await OrderService(session).update_order_payment_guard(
+                    order_id,
+                    state,
+                    fail_reason=fail_reason,
+                    clear_fail_reason=state_name == "ready",
+                    terminal_status=terminal_status,
+                )
+        except Exception as exc:
+            logger.warning(
+                f"【{self.cookie_id}】订单 {order_id} 付款状态持久化失败: {self._safe_str(exc)}"
+            )
+            return False
+
+    @staticmethod
+    def _terminal_order_status(reason_code: str | None) -> str | None:
+        return {
+            "order_closed": "closed",
+            "order_cancelled": "cancelled",
+            "order_refunded": "refunded",
+            "transaction_failed": "failed",
+            "transaction_completed": "completed",
+            "already_shipped": "shipped",
+        }.get(reason_code)
+
+    def _schedule_payment_retry(
+        self,
+        order_id: str,
+        *,
+        item_id: str | None,
+        buyer_id: str | None,
+        chat_id: str | None,
+        send_user_name: str | None,
+        state: dict,
+    ) -> None:
+        """Schedule at most one in-process recovery task for an order."""
+        existing = self._payment_retry_tasks.get(order_id)
+        if existing is not None and not existing.done():
+            return
+
+        context = state.get("context") or self._payment_retry_context(
+            item_id=item_id,
+            buyer_id=buyer_id,
+            chat_id=chat_id,
+            send_user_name=send_user_name,
+        )
+        task_coro = self._run_payment_delivery_retry(order_id, context, state)
+        create_tracked_task = getattr(self.parent, "_create_tracked_task", None)
+        task = create_tracked_task(task_coro) if callable(create_tracked_task) else asyncio.create_task(task_coro)
+        self._payment_retry_tasks[order_id] = task
+
+        def _forget_task(done_task):
+            if self._payment_retry_tasks.get(order_id) is done_task:
+                self._payment_retry_tasks.pop(order_id, None)
+
+        task.add_done_callback(_forget_task)
+        logger.info(
+            f"【{self.cookie_id}】订单 {order_id} 已安排付款金额恢复重试: "
+            f"attempt={state.get('attempt')}/{state.get('max')}, next_retry={state.get('next_retry')}"
+        )
+
+    def _cancel_payment_retry(self, order_id: str) -> None:
+        task = self._payment_retry_tasks.get(order_id)
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        self._payment_retry_tasks.pop(order_id, None)
+
+    async def _refresh_order_payment_state(
+        self,
+        order_id: str,
+        item_id: str | None,
+        buyer_id: str | None,
+    ) -> dict:
+        """Refresh both platform shipping state and order amount.
+
+        The status checker and detail fetch deliberately remain separate: the
+        former is authoritative for paid/deliverable/terminal state, while the
+        latter updates the local amount and other order detail fields.
+        """
+        from common.db.compat import db_manager
+        from common.services.order_payment_guard import classify_terminal_reason
+
+        local_order = None
+        try:
+            local_order = db_manager.get_order_by_id(order_id)
+        except Exception as exc:
+            logger.warning(f"【{self.cookie_id}】读取订单 {order_id} 本地状态失败: {self._safe_str(exc)}")
+
+        local_amount = (local_order or {}).get("amount")
+        local_status = (local_order or {}).get("status")
+        status_result: dict = {}
+
+        try:
+            from common.services.order_service import OrderStatusChecker
+
+            checker = OrderStatusChecker(self.cookies_str, account_id=self.cookie_id)
+            status_result = await checker.check_can_ship(order_id)
+            if checker.cookies_str and checker.cookies_str != self.cookies_str:
+                self.cookies_str = checker.cookies_str
+                try:
+                    self.cookies = checker.cookies_str
+                except Exception:
+                    pass
+        except Exception as exc:
+            status_result = {
+                "success": False,
+                "can_ship": None,
+                "reason": f"订单状态刷新异常: {self._safe_str(exc)}",
+                "order_status": "未知",
+            }
+
+        status_reason = status_result.get("reason") or ""
+        platform_status = status_result.get("order_status") or "未知"
+        terminal_reason = classify_terminal_reason(
+            status_reason=status_reason,
+            platform_status=platform_status,
+            local_status=local_status,
+        )
+        if terminal_reason:
+            return {
+                "amount": local_amount,
+                "can_ship": False,
+                "status_reason": status_reason,
+                "platform_status": platform_status,
+                "local_status": local_status,
+                "terminal_reason": terminal_reason,
+                "refresh_ok": bool(status_result.get("success")),
+            }
+
+        # Force a detail request even if a complete-looking local spec is
+        # already present.  The amount is the field affected by this race.
+        detail = None
+        try:
+            detail = await self.fetch_order_detail_info(
+                order_id,
+                item_id=item_id,
+                buyer_id=buyer_id,
+                force_refresh=True,
+            )
+        except Exception as exc:
+            logger.warning(f"【{self.cookie_id}】刷新订单 {order_id} 金额异常: {self._safe_str(exc)}")
+
+        amount = local_amount
+        amount_authoritative = False
+        if isinstance(detail, dict) and "amount" in detail:
+            detail_amount = detail.get("amount")
+            if detail_amount is not None and str(detail_amount).strip() != "":
+                amount = detail_amount
+                from common.services.order_payment_guard import parse_amount
+
+                amount_authoritative = parse_amount(detail_amount) is not None
+
+        return {
+            "amount": amount,
+            "can_ship": status_result.get("can_ship") if status_result.get("success") else None,
+            "status_reason": status_reason or "订单状态暂不可用",
+            "platform_status": platform_status,
+            "local_status": local_status,
+            "amount_authoritative": amount_authoritative,
+            "refresh_ok": bool(status_result.get("success")) and detail is not None,
+        }
+
+    async def ensure_payment_ready_for_delivery(
+        self,
+        order_id: str,
+        *,
+        item_id: str | None = None,
+        buyer_id: str | None = None,
+        chat_id: str | None = None,
+        send_user_name: str | None = None,
+        schedule_retry: bool = True,
+    ) -> dict:
+        """Gate automatic delivery on refreshed amount and platform state."""
+        from common.db.compat import db_manager
+        from common.services.order_payment_guard import (
+            PAYMENT_GUARD_METADATA_KEY,
+            build_ready_state,
+            build_retry_state,
+            build_terminal_state,
+            classify_payment_state,
+            classify_terminal_reason,
+            is_retry_due,
+        )
+
+        if not order_id:
+            return {"action": "stop", "reason": {"code": "missing_order_id", "message": "订单号为空"}}
+
+        max_attempts, base_delay, max_delay = self._payment_guard_config()
+        context = self._payment_retry_context(
+            item_id=item_id,
+            buyer_id=buyer_id,
+            chat_id=chat_id,
+            send_user_name=send_user_name,
+        )
+
+        async with self._payment_guard_locks[order_id]:
+            try:
+                local_order = db_manager.get_order_by_id(order_id) or {}
+            except Exception as exc:
+                local_order = {}
+                logger.warning(f"【{self.cookie_id}】读取订单 {order_id} 失败: {self._safe_str(exc)}")
+
+            metadata = local_order.get("metadata") or local_order.get("metadata_json") or {}
+            previous = metadata.get(PAYMENT_GUARD_METADATA_KEY) if isinstance(metadata, dict) else None
+            previous = dict(previous) if isinstance(previous, dict) else None
+
+            if previous and previous.get("state") == "stopped":
+                reason = previous.get("reason") or {
+                    "code": "payment_guard_stopped",
+                    "message": "订单付款安全门已停止重试",
+                }
+                action = "already_shipped" if reason.get("code") == "already_shipped" else "stop"
+                return {"action": action, "reason": reason, "state": previous}
+
+            if previous and previous.get("state") == "retrying" and not is_retry_due(previous):
+                if schedule_retry:
+                    self._schedule_payment_retry(
+                        order_id,
+                        item_id=item_id,
+                        buyer_id=buyer_id,
+                        chat_id=chat_id,
+                        send_user_name=send_user_name,
+                        state=previous,
+                    )
+                return {"action": "retry", "reason": previous.get("reason") or {}, "state": previous}
+
+            local_terminal = classify_terminal_reason(local_status=local_order.get("status"))
+            if local_terminal:
+                state = build_terminal_state(
+                    previous,
+                    local_terminal,
+                    max_attempts=max_attempts,
+                    context=context,
+                )
+                await self._persist_payment_guard_state(
+                    order_id,
+                    state,
+                    terminal_status=self._terminal_order_status(local_terminal.get("code")),
+                )
+                self._cancel_payment_retry(order_id)
+                action = "already_shipped" if local_terminal.get("code") == "already_shipped" else "stop"
+                return {"action": action, "reason": local_terminal, "state": state}
+
+            refreshed = await self._refresh_order_payment_state(order_id, item_id, buyer_id)
+            terminal_reason = refreshed.get("terminal_reason")
+            if terminal_reason:
+                state = build_terminal_state(
+                    previous,
+                    terminal_reason,
+                    max_attempts=max_attempts,
+                    context=context,
+                )
+                await self._persist_payment_guard_state(
+                    order_id,
+                    state,
+                    terminal_status=self._terminal_order_status(terminal_reason.get("code")),
+                )
+                self._cancel_payment_retry(order_id)
+                action = "already_shipped" if terminal_reason.get("code") == "already_shipped" else "stop"
+                return {"action": action, "reason": terminal_reason, "state": state, "refresh": refreshed}
+
+            decision = classify_payment_state(
+                amount=refreshed.get("amount"),
+                can_ship=refreshed.get("can_ship"),
+                status_reason=refreshed.get("status_reason"),
+                platform_status=refreshed.get("platform_status"),
+                local_status=refreshed.get("local_status"),
+                amount_authoritative=refreshed.get("amount_authoritative", False),
+            )
+            if decision.action == "proceed":
+                state = build_ready_state(
+                    previous,
+                    amount=refreshed.get("amount"),
+                    platform_status=refreshed.get("platform_status"),
+                    max_attempts=max_attempts,
+                    context=context,
+                )
+                await self._persist_payment_guard_state(order_id, state)
+                self._cancel_payment_retry(order_id)
+                return {"action": "proceed", "reason": decision.reason, "state": state, "refresh": refreshed}
+
+            state = build_retry_state(
+                previous,
+                decision.reason,
+                max_attempts=max_attempts,
+                base_delay_seconds=base_delay,
+                max_delay_seconds=max_delay,
+                context=context,
+            )
+            terminal_status = None
+            if state.get("state") == "stopped":
+                terminal_status = "failed" if state.get("reason", {}).get("code") == "transaction_failed" else None
+            await self._persist_payment_guard_state(
+                order_id,
+                state,
+                terminal_status=terminal_status,
+            )
+            if state.get("state") == "retrying" and schedule_retry:
+                self._schedule_payment_retry(
+                    order_id,
+                    item_id=item_id,
+                    buyer_id=buyer_id,
+                    chat_id=chat_id,
+                    send_user_name=send_user_name,
+                    state=state,
+                )
+            return {"action": "retry", "reason": state.get("reason") or {}, "state": state, "refresh": refreshed}
+
+    async def _run_payment_delivery_retry(
+        self,
+        order_id: str,
+        context: dict,
+        initial_state: dict,
+    ) -> None:
+        """Resume a persisted payment race until ready or permanently stopped."""
+        from common.db.compat import db_manager
+        from common.services.order_payment_guard import (
+            PAYMENT_GUARD_METADATA_KEY,
+            is_retry_due,
+        )
+
+        state = initial_state
+        try:
+            while True:
+                try:
+                    current_order = db_manager.get_order_by_id(order_id) or {}
+                except Exception:
+                    current_order = {}
+                metadata = current_order.get("metadata") or current_order.get("metadata_json") or {}
+                persisted = metadata.get(PAYMENT_GUARD_METADATA_KEY) if isinstance(metadata, dict) else None
+                if isinstance(persisted, dict):
+                    state = persisted
+                if state.get("state") != "retrying":
+                    return
+
+                if not is_retry_due(state):
+                    next_retry = state.get("next_retry")
+                    try:
+                        from datetime import datetime, timezone
+
+                        retry_at = datetime.fromisoformat(str(next_retry).replace("Z", "+00:00"))
+                        delay = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+                    except (TypeError, ValueError):
+                        delay = 0.0
+                    await asyncio.sleep(delay)
+
+                result = await self.ensure_payment_ready_for_delivery(
+                    order_id,
+                    item_id=context.get("item_id"),
+                    buyer_id=context.get("buyer_id"),
+                    chat_id=context.get("chat_id"),
+                    send_user_name=context.get("send_user_name"),
+                    schedule_retry=False,
+                )
+                if result.get("action") == "retry":
+                    state = result.get("state") or state
+                    if state.get("state") == "retrying":
+                        continue
+                    return
+                if result.get("action") != "proceed":
+                    return
+
+                if not self.is_auto_confirm_enabled():
+                    logger.info(f"【{self.cookie_id}】订单 {order_id} 自动确认已关闭，付款恢复后不继续自动发货")
+                    return
+                await self._handle_auto_delivery(
+                    websocket=self.ws,
+                    message={},
+                    send_user_name=context.get("send_user_name", ""),
+                    send_user_id=context.get("buyer_id", ""),
+                    item_id=context.get("item_id", ""),
+                    chat_id=context.get("chat_id", ""),
+                    msg_time="payment-retry",
+                    override_order_id=order_id,
+                    skip_payment_guard=True,
+                )
+                return
+        except asyncio.CancelledError:
+            logger.debug(f"【{self.cookie_id}】订单 {order_id} 付款恢复任务已取消")
+            raise
+        except Exception as exc:
+            logger.error(f"【{self.cookie_id}】订单 {order_id} 付款恢复任务异常: {self._safe_str(exc)}")
+
 
     # ==================== 统一发货处理 ====================
 
     async def _handle_auto_delivery(self, websocket, message: dict, send_user_name: str, send_user_id: str,
                                    item_id: str, chat_id: str, msg_time: str, override_order_id: str = None,
-                                   pre_check_result: dict | None = None):
+                                   pre_check_result: dict | None = None,
+                                   skip_payment_guard: bool = False):
         """统一处理自动发货逻辑
 
         Args:
@@ -883,21 +1323,21 @@ class AutoDeliveryHandler:
             # 订单ID已提取，将在自动发货时进行确认发货处理
             logger.info(f'[{msg_time}] 【{self.cookie_id}】提取到订单ID: {order_id}，将在自动发货时处理确认发货')
 
-            # 检查订单金额，金额为0禁止发货
-            try:
-                from common.db.compat import db_manager
-                order_check = db_manager.get_order_by_id(order_id)
-                if order_check:
-                    order_amount = order_check.get('amount')
-                    if order_amount is not None:
-                        from decimal import Decimal
-                        if Decimal(str(order_amount)) <= 0:
-                            logger.warning(f'[{msg_time}] 【{self.cookie_id}】❌ 订单 {order_id} 金额为 {order_amount}，禁止自动发货')
-                            # 记录失败原因（对外展示统一提示为账号掉线，便于运营快速定位真实原因）
-                            await self._update_delivery_fail_reason(order_id, "账号已掉线，请重新登录")
-                            return
-            except Exception as e:
-                logger.warning(f'[{msg_time}] 【{self.cookie_id}】检查订单金额异常: {self._safe_str(e)}')
+            if not skip_payment_guard:
+                payment_guard = await self.ensure_payment_ready_for_delivery(
+                    order_id,
+                    item_id=item_id,
+                    buyer_id=send_user_id,
+                    chat_id=chat_id,
+                    send_user_name=send_user_name,
+                    schedule_retry=True,
+                )
+                if payment_guard.get("action") != "proceed":
+                    logger.info(
+                        f'[{msg_time}] 【{self.cookie_id}】订单 {order_id} 未通过付款安全门: '
+                        f"action={payment_guard.get('action')}, reason={payment_guard.get('reason')}"
+                    )
+                    return
 
             # 禁止发货统一拦截：调用 pre_delivery_check_and_close 完成"取设置→评价
             # 检查→命中后发消息+写 fail_reason+按开关关闭订单"全部链路。

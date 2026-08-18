@@ -7,8 +7,11 @@
 3. 用户注册
 4. 用户登出
 """
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -31,6 +34,61 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class LocalPasswordRequest(BaseModel):
+    """Initial password setup payload accepted only from the local machine."""
+
+    username: str = Field(min_length=1, max_length=64)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    return bool(address.version == 6 and address.ipv4_mapped and address.ipv4_mapped.is_loopback)
+
+
+def _is_loopback_request(request: Request) -> bool:
+    """Only trust forwarded client IPs when the immediate peer is local."""
+    client_host = request.client.host if request.client else None
+    if not _is_loopback_host(client_host):
+        return False
+
+    forwarded_host = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if not forwarded_host:
+        return True
+    return _is_loopback_host(forwarded_host.split(",", 1)[0].strip())
+
+
+def _password_setup_response() -> LoginResponse:
+    return LoginResponse(
+        success=False,
+        message="首次使用，请在部署机器本机设置管理员密码",
+        requires_password_setup=True,
+    )
+
+
+def _login_failure_response(
+    auth_service: AuthService,
+    message: str,
+    user: User | None,
+) -> LoginResponse:
+    return LoginResponse(
+        success=False,
+        message=message,
+        requires_local_reset=bool(
+            user
+            and user.role == UserRole.ADMIN
+            and auth_service.is_login_locked(user)
+        ),
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login_user(
     payload: LoginRequest,
@@ -38,6 +96,7 @@ async def login_user(
     session: AsyncSession = Depends(deps.get_db_session),
 ) -> LoginResponse:
     user: User | None = None
+    candidate_user: User | None = None
     error_message: str | None = None
 
     # 检查是否启用了登录滑动验证码
@@ -49,6 +108,10 @@ async def login_user(
 
     # 账号密码登录和邮箱密码登录需要验证滑动验证码
     if payload.username and payload.password:
+        candidate_user = await auth_service.get_by_username(payload.username)
+        if candidate_user and auth_service.is_password_setup_required(candidate_user):
+            return _password_setup_response()
+
         # 账号密码登录 - 需要滑动验证（如果开启）
         if captcha_enabled:
             from app.api.routes.geetest import check_geetest_verified
@@ -62,6 +125,10 @@ async def login_user(
         
         user, error_message = await auth_service.authenticate_by_username(payload.username, payload.password)
     elif payload.email and payload.password:
+        candidate_user = await auth_service.get_by_email(payload.email)
+        if candidate_user and auth_service.is_password_setup_required(candidate_user):
+            return _password_setup_response()
+
         # 邮箱密码登录 - 需要滑动验证（如果开启）
         if captcha_enabled:
             from app.api.routes.geetest import check_geetest_verified
@@ -86,11 +153,16 @@ async def login_user(
         user = await user_service.get_by_email(payload.email)
         if not user:
             return LoginResponse(success=False, message="该邮箱未注册")
+        candidate_user = user
+        if auth_service.is_password_setup_required(user):
+            return _password_setup_response()
+        if auth_service.is_login_locked(user):
+            return _login_failure_response(auth_service, "账号已被锁定，请在部署机器本机重置管理员密码", user)
     else:
         return LoginResponse(success=False, message="请提供有效的登录信息")
 
     if not user:
-        return LoginResponse(success=False, message=error_message or "登录失败")
+        return _login_failure_response(auth_service, error_message or "登录失败", candidate_user)
 
     if user.status != UserStatus.ACTIVE:
         return LoginResponse(success=False, message="账号已禁用，请联系管理员")
@@ -171,7 +243,11 @@ async def refresh_token(
         return LoginResponse(success=False, message="刷新令牌无效")
 
     user = await session.get(User, int(sub))
-    if not user or user.status != UserStatus.ACTIVE:
+    if (
+        not user
+        or user.status != UserStatus.ACTIVE
+        or auth_service.is_password_setup_required(user)
+    ):
         return LoginResponse(success=False, message="用户不存在或已被禁用")
 
     # 生成新的access token和refresh token
@@ -188,20 +264,67 @@ async def refresh_token(
 
 
 @router.get("/check-default-password", response_model=ApiResponse)
-async def check_default_password(
+async def check_password_setup(
     current_user: User = Depends(deps.get_current_admin_user),
     auth_service: AuthService = Depends(deps.get_auth_service),
 ) -> ApiResponse:
-    """
-    检查管理员密码是否为默认值（admin123）
-    仅管理员可调用，返回 data.is_default 表示是否为默认密码
-    """
-    is_default = auth_service._verify_user_password(current_user, "admin123")
+    """Backward-compatible status endpoint without checking a fixed password."""
     return ApiResponse(
         success=True,
         message="检查完成",
-        data={"is_default": is_default},
+        data={
+            "is_default": False,
+            "requires_password_setup": auth_service.is_password_setup_required(current_user),
+        },
     )
+
+
+@router.get("/setup-status", response_model=ApiResponse)
+async def get_setup_status(
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db_session),
+    auth_service: AuthService = Depends(deps.get_auth_service),
+) -> ApiResponse:
+    """Report the first-setup state to a browser running on the host machine."""
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="首次设置仅允许在部署机器本机完成")
+
+    result = await session.execute(
+        select(User)
+        .where(User.role == UserRole.ADMIN)
+        .order_by(User.id)
+        .limit(1)
+    )
+    admin = result.scalar_one_or_none()
+    requires_setup = bool(admin and auth_service.is_password_setup_required(admin))
+    return ApiResponse(
+        success=True,
+        message="获取成功",
+        data={
+            "requires_password_setup": requires_setup,
+            "username": admin.username if requires_setup else None,
+        },
+    )
+
+
+@router.post("/local-setup-password", response_model=ApiResponse)
+async def local_setup_password(
+    payload: LocalPasswordRequest,
+    request: Request,
+    auth_service: AuthService = Depends(deps.get_auth_service),
+) -> ApiResponse:
+    """Set the fresh-install administrator password from loopback only."""
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="首次设置仅允许在部署机器本机完成")
+
+    user = await auth_service.get_by_username(payload.username)
+    if not user or user.role != UserRole.ADMIN:
+        return ApiResponse(success=False, message="未找到可设置的管理员账号")
+    try:
+        await auth_service.set_password(user, payload.new_password, initial_only=True)
+    except ValueError as exc:
+        return ApiResponse(success=False, message=str(exc))
+    return ApiResponse(success=True, message="管理员密码已设置，请使用新密码登录")
 
 
 @router.post("/register", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
@@ -259,6 +382,8 @@ async def reset_password(
 
     # 更新密码（直接操作 ORM 对象后 commit）
     user.password_hash = get_password_hash(payload.new_password)
+    user.login_fail_count = 0
+    user.login_locked_until = None
     await session.commit()
 
     return ApiResponse(success=True, message="密码重置成功")

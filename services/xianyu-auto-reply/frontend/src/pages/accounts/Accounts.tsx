@@ -422,9 +422,9 @@ export function Accounts() {
     setAiTimeRangeEnd('')
   }, [clearQrCheck, clearPwdCheck])
 
-  // ==================== 管理员默认密码检查 ====================
+  // ==================== 管理员密码安全检查 ====================
   /**
-   * 检查管理员是否使用默认密码，如果是则弹窗提示并阻止添加账号
+   * 检查管理员是否仍需完成密码设置，如果是则弹窗提示并阻止添加账号
    * 返回 true 表示通过检查（可以继续），false 表示被拦截
    */
   const checkAdminPassword = async (): Promise<boolean> => {
@@ -434,10 +434,10 @@ export function Accounts() {
     }
     try {
       const result = await checkAdminDefaultPassword()
-      if (result.success && result.data?.is_default) {
+      if (result.success && result.data?.requires_password_setup) {
         addToast({
           type: 'warning',
-          message: '检测到您仍在使用默认密码，为保障系统安全，请先前往个人设置修改密码后再添加账号',
+          message: '管理员密码尚未完成安全设置，请先完成密码设置后再添加账号',
         })
         return false
       }
@@ -450,7 +450,7 @@ export function Accounts() {
 
   // ==================== 扫码登录 ====================
   const startQRCodeLogin = async () => {
-    // 管理员默认密码检查
+    // 管理员密码安全检查
     const passed = await checkAdminPassword()
     if (!passed) return
 

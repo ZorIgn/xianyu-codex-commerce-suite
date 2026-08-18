@@ -578,7 +578,7 @@ class DeliveryQueueManager:
                 if now - last_recovery >= 1.0:
                     self._recover_expired()
                     last_recovery = now
-                desired = _int_setting("delivery_worker_count", 6)
+                desired = _int_setting("delivery_worker_count", 1)
                 for slot in range(desired):
                     task = self.worker_tasks.get(slot)
                     if task is None or task.done():
@@ -625,7 +625,7 @@ def delivery_worker_status() -> dict[str, Any]:
     return {
         "running": bool(manager.task and not manager.task.done()),
         "worker_count": len(manager.worker_tasks),
-        "worker_capacity": _int_setting("delivery_worker_count", 6),
+        "worker_capacity": _int_setting("delivery_worker_count", 1),
         "pending_jobs": int(pending or 0),
         "active_job_ids": sorted(manager.active_job_ids),
     }

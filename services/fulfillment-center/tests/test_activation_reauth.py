@@ -35,6 +35,7 @@ class ActivationReauthQueueTest(unittest.TestCase):
             {
                 "email": "queue-reauth@example.com",
                 "password": "pw",
+                "account_id": "queue-reauth-account",
                 "access_token": "a",
                 "refresh_token": "r",
                 "id_token": "i",

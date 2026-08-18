@@ -14,6 +14,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from ..audit import write_audit
 from ..config import get_settings
+from ..inventory import activation_eligibility
 from ..settings_store import get_setting, update_settings
 from .base_provider import result_dict
 from .codex_desktop_wire import (
@@ -650,6 +651,15 @@ class CodexWsProvider:
         settings = get_settings()
         order_id = str(item.get("reserved_order_id") or "")
         inventory_id = int(item.get("id") or 0)
+        eligible, eligibility_reason = activation_eligibility(item)
+        if not eligible:
+            return result_dict(
+                ok=False,
+                error=f"库存不可正式激活: {eligibility_reason}",
+                stage="ws_ineligible",
+                sent_unknown=False,
+                provider="ws",
+            )
         if settings.dry_run:
             return result_dict(
                 ok=True,

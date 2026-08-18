@@ -665,6 +665,7 @@ class DBManagerCompat:
                     'amount': str(order.amount) if order.amount else '0',
                     'quantity': order.quantity,
                     'is_bargain': order.is_bargain,
+                    'metadata': order.metadata_json or {},
                 }
         return self._run_async(_query)
     

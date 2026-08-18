@@ -25,6 +25,8 @@ from common.utils.time_utils import BEIJING_TZ, get_beijing_now
 # 登录失败限制配置
 MAX_LOGIN_FAIL_COUNT = 3  # 最大失败次数
 LOGIN_LOCK_HOURS = 2  # 锁定时长（小时）
+MIN_PASSWORD_LENGTH = 6
+PASSWORD_SETUP_REQUIRED_MESSAGE = "首次使用，请在部署机器本机设置管理员密码"
 
 class AuthService:
     """Encapsulates authentication related domain logic."""
@@ -32,6 +34,30 @@ class AuthService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.settings = get_settings()
+
+    @staticmethod
+    def is_password_setup_required(user: User) -> bool:
+        """Return whether the account still has no configured password.
+
+        The initial administrator is represented by an empty password hash so
+        this remains compatible with the existing NOT NULL database column.
+        """
+        return not bool((user.password_hash or "").strip())
+
+    async def get_by_username(self, username: str) -> User | None:
+        if not username:
+            return None
+        stmt = select(User).where(func.lower(User.username) == username.lower())
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_by_email(self, email: str) -> User | None:
+        if not email:
+            return None
+        stmt = select(User).where(func.lower(User.email) == email.lower())
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    def is_login_locked(self, user: User) -> bool:
+        return self._check_login_locked(user)[0]
 
     def _check_login_locked(self, user: User) -> Tuple[bool, Optional[str]]:
         """
@@ -89,11 +115,13 @@ class AuthService:
         """
         if not username:
             return None, "请输入用户名"
-        stmt = select(User).where(func.lower(User.username) == username.lower())
-        user = (await self.session.execute(stmt)).scalar_one_or_none()
+        user = await self.get_by_username(username)
         
         if not user:
             return None, "用户名或密码错误"
+
+        if self.is_password_setup_required(user):
+            return None, PASSWORD_SETUP_REQUIRED_MESSAGE
         
         # 检查是否被锁定
         is_locked, lock_msg = self._check_login_locked(user)
@@ -116,11 +144,13 @@ class AuthService:
         """
         if not email:
             return None, "请输入邮箱"
-        stmt = select(User).where(func.lower(User.email) == email.lower())
-        user = (await self.session.execute(stmt)).scalar_one_or_none()
+        user = await self.get_by_email(email)
         
         if not user:
             return None, "邮箱或密码错误"
+
+        if self.is_password_setup_required(user):
+            return None, PASSWORD_SETUP_REQUIRED_MESSAGE
         
         # 检查是否被锁定
         is_locked, lock_msg = self._check_login_locked(user)
@@ -140,9 +170,33 @@ class AuthService:
         if not password:
             return False
         stored_hash = (user.password_hash or "").strip()
+        if not stored_hash:
+            return False
         if len(stored_hash) == 64 and all(c in "0123456789abcdefABCDEF" for c in stored_hash):
             return sha256(password.encode("utf-8")).hexdigest() == stored_hash.lower()
-        return security.verify_password(password, stored_hash)
+        try:
+            return security.verify_password(password, stored_hash)
+        except Exception:
+            return False
+
+    async def set_password(
+        self,
+        user: User,
+        password: str,
+        *,
+        initial_only: bool = False,
+    ) -> None:
+        """Set an administrator password and clear authentication lock state."""
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"密码长度不能少于{MIN_PASSWORD_LENGTH}位")
+        if initial_only and not self.is_password_setup_required(user):
+            raise ValueError("管理员密码已经设置，请使用本机重置命令")
+
+        user.password_hash = security.get_password_hash(password)
+        user.login_fail_count = 0
+        user.login_locked_until = None
+        await self.session.flush()
+        await self.session.commit()
 
     async def mark_login(self, user: User) -> None:
         user.last_login_at = get_beijing_now()

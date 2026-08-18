@@ -104,7 +104,7 @@ def get_settings() -> Settings:
         desktop_autoclose=_bool(os.getenv("DESKTOP_AUTOCLOSE"), True),
         desktop_require_account_verification=_bool(os.getenv("DESKTOP_REQUIRE_ACCOUNT_VERIFICATION"), True),
         desktop_instance_pool=os.getenv("DESKTOP_INSTANCE_POOL", "").strip(),
-        activation_worker_count=max(1, int(os.getenv("ACTIVATION_WORKER_COUNT", "3"))),
+        activation_worker_count=max(1, int(os.getenv("ACTIVATION_WORKER_COUNT", "1"))),
         desktop_background_mode=_bool(os.getenv("DESKTOP_BACKGROUND_MODE"), False),
         desktop_allow_foreground_fallback=_bool(os.getenv("DESKTOP_ALLOW_FOREGROUND_FALLBACK"), False),
         ws_base_url=os.getenv("WS_BASE_URL", "https://chatgpt.com/backend-api/codex").strip(),

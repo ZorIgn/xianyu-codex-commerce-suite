@@ -7,6 +7,11 @@ const SYSTEM_PREFIX = '/api/v1/system-settings'
 const CAPTCHA_PREFIX = '/api/v1/captcha'
 const GEETEST_PREFIX = '/api/v1/geetest'
 
+interface PasswordSetupStatus {
+  requires_password_setup: boolean
+  username?: string | null
+}
+
 // 缓存公共设置，避免重复请求
 let publicSettingsCache: Record<string, unknown> | null = null
 let publicSettingsPromise: Promise<Record<string, unknown>> | null = null
@@ -39,6 +44,19 @@ const getPublicSettings = async (): Promise<Record<string, unknown>> => {
 // 用户登录
 export const login = (data: LoginRequest): Promise<LoginResponse> => {
   return post(`${AUTH_PREFIX}/login`, data)
+}
+
+// 仅在部署机器本机查询首次设置状态
+export const getInitialPasswordSetupStatus = (): Promise<ApiResponse<PasswordSetupStatus>> => {
+  return get(`${AUTH_PREFIX}/setup-status`)
+}
+
+// 仅在部署机器本机设置全新部署管理员密码
+export const setInitialAdminPassword = (data: {
+  username: string
+  new_password: string
+}): Promise<ApiResponse> => {
+  return post(`${AUTH_PREFIX}/local-setup-password`, data)
 }
 
 // 验证 Token
@@ -164,8 +182,11 @@ export const geetestValidate = (data: {
   return post(`${GEETEST_PREFIX}/validate`, data)
 }
 
-// 检查管理员密码是否为默认值
-export const checkAdminDefaultPassword = (): Promise<ApiResponse<{ is_default: boolean }>> => {
+// 检查管理员是否仍需完成密码设置；保留旧字段以兼容既有调用方
+export const checkAdminDefaultPassword = (): Promise<ApiResponse<{
+  is_default: boolean
+  requires_password_setup?: boolean
+}>> => {
   return get(`${AUTH_PREFIX}/check-default-password`)
 }
 

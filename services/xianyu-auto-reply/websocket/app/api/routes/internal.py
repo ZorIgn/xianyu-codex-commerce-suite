@@ -697,19 +697,6 @@ async def deliver_order(request: DeliverOrderRequest):
                 detail=f"订单不存在: {request.order_no}"
             )
         
-        # 检查订单金额，金额为0禁止发货
-        order_amount = order_info.get('amount')
-        if order_amount is not None:
-            from decimal import Decimal
-            if Decimal(str(order_amount)) <= 0:
-                logger.warning(f"【内部API】❌ 订单 {request.order_no} 金额为 {order_amount}，禁止发货")
-                return {
-                    "success": False,
-                    "code": 400,
-                    "message": "订单金额为0，禁止发货",
-                    "data": None
-                }
-
         account_id = order_info.get('account_id')
         if not account_id:
             raise HTTPException(
@@ -736,6 +723,40 @@ async def deliver_order(request: DeliverOrderRequest):
                 "code": 503,
                 "message": "WebSocket 未连接",
                 "data": None
+            }
+
+        # 付款事件和订单详情同步可能并行到达。让统一付款安全门先强制
+        # 刷新状态/金额；只有正金额且已付款待发货才允许触碰库存或发送消息。
+        payment_guard = await xianyu_live.auto_delivery_handler.ensure_payment_ready_for_delivery(
+            request.order_no,
+            item_id=request.item_id,
+            buyer_id=request.buyer_id,
+            chat_id=request.chat_id,
+            schedule_retry=request.delivery_method in {"auto", "scheduled"},
+        )
+        guard_action = payment_guard.get("action")
+        if guard_action == "already_shipped":
+            return {
+                "success": True,
+                "code": 200,
+                "message": "订单已发货，跳过重复发货",
+                "data": {"order_no": request.order_no, "payment_guard": payment_guard},
+            }
+        if guard_action == "retry":
+            return {
+                "success": False,
+                "code": 202,
+                "message": "订单金额或付款状态尚未同步，已安排有限重试",
+                "data": {"order_no": request.order_no, "payment_guard": payment_guard},
+            }
+        if guard_action != "proceed":
+            return {
+                "success": False,
+                "code": 409,
+                "message": (payment_guard.get("reason") or {}).get(
+                    "message", "订单已进入不可发货终态"
+                ),
+                "data": {"order_no": request.order_no, "payment_guard": payment_guard},
             }
         
         # 履约中心接管：优先从本地库存中心按份数出库，再由当前闲鱼 WebSocket 发送发货文本。

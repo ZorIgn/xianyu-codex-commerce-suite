@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import ctypes
 import json
 import os
@@ -18,6 +17,7 @@ from typing import Any, Callable
 import psutil
 
 from ..config import get_settings
+from ..inventory import activation_eligibility, extract_oauth_fields
 from ..settings_store import get_setting, update_settings
 
 
@@ -40,18 +40,6 @@ class OAuthTokens:
     account_id: str
 
 
-def _decode_jwt_payload(token: str) -> dict[str, Any]:
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return {}
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        decoded = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-        return decoded if isinstance(decoded, dict) else {}
-    except Exception:
-        return {}
-
-
 def _credentials_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -68,49 +56,12 @@ def _credentials_dict(value: Any) -> dict[str, Any]:
 
 
 def _extract_oauth_tokens(item: dict[str, Any]) -> OAuthTokens:
-    try:
-        raw = json.loads(item.get("source_payload") or "{}")
-        raw = raw if isinstance(raw, dict) else {}
-    except Exception:
-        raw = {}
-    credentials = _credentials_dict(raw.get("credentials"))
-    merged = {**raw, **credentials}
-    access_token = str(
-        item.get("primary_token")
-        or merged.get("access_token")
-        or merged.get("accessToken")
-        or ""
-    ).strip()
-    refresh_token = str(
-        item.get("refresh_token")
-        or merged.get("refresh_token")
-        or merged.get("refreshToken")
-        or ""
-    ).strip()
-    id_token = str(merged.get("id_token") or merged.get("idToken") or "").strip()
-    account_id = str(
-        merged.get("account_id")
-        or merged.get("accountId")
-        or merged.get("chatgpt_account_id")
-        or ""
-    ).strip()
-    if not account_id:
-        for token in (access_token, id_token):
-            payload = _decode_jwt_payload(token)
-            auth = payload.get("https://api.openai.com/auth", {})
-            if isinstance(auth, dict):
-                account_id = str(
-                    auth.get("chatgpt_account_id")
-                    or auth.get("account_id")
-                    or ""
-                ).strip()
-            if account_id:
-                break
+    oauth = extract_oauth_fields(item)
     return OAuthTokens(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        id_token=id_token,
-        account_id=account_id,
+        access_token=oauth["access_token"],
+        refresh_token=oauth["refresh_token"],
+        id_token=oauth["id_token"],
+        account_id=oauth["account_id"],
     )
 
 
@@ -754,14 +705,13 @@ class DesktopProvider:
             expected = expected_email.strip().lower()
             if not expected:
                 return True
-            claimed_emails: set[str] = set()
-            for token in (tokens.id_token, tokens.access_token):
-                claims = _decode_jwt_payload(token)
-                for key in ("email", "preferred_username", "upn"):
-                    value = str(claims.get(key) or "").strip().lower()
-                    if value:
-                        claimed_emails.add(value)
-            return not claimed_emails or expected in claimed_emails
+            claimed_email = extract_oauth_fields(
+                {
+                    "primary_token": tokens.access_token,
+                    "id_token": tokens.id_token,
+                }
+            )["email"]
+            return not claimed_email or expected == claimed_email
         except Exception:
             return False
 
@@ -991,6 +941,14 @@ class DesktopProvider:
         instance: DesktopInstance | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
+        eligible, eligibility_reason = activation_eligibility(item)
+        if not eligible:
+            return {
+                "ok": False,
+                "error": f"库存不可正式激活: {eligibility_reason}",
+                "stage": "ineligible",
+                "sent_unknown": False,
+            }
         if settings.dry_run:
             return {
                 "ok": True,

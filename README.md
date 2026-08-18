@@ -23,7 +23,7 @@
 [![Docker](https://img.shields.io/badge/Docker-infrastructure-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-inventory-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 
-[核心能力](#-核心能力) · [业务架构](#️-业务架构) · [快速开始](#-快速开始) · [履约流程](#-履约流程) · [安全说明](#-安全说明)
+[部署教程](docs/DEPLOYMENT_GUIDE.md) · [核心能力](#-核心能力) · [业务架构](#️-业务架构) · [快速开始](#-快速开始) · [履约流程](#-履约流程) · [安全说明](#-安全说明)
 
 </div>
 

@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
 import subprocess
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import get_settings
+from .inventory import activation_eligibility, extract_oauth_fields
 from .settings_store import get_setting
 
 
@@ -33,18 +33,6 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 12:
         return "***"
     return f"{value[:6]}...{value[-4:]}"
-
-
-def _decode_jwt_payload(token: str) -> dict[str, Any]:
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return {}
-        payload = parts[1]
-        payload += "=" * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
-    except Exception:
-        return {}
 
 
 def _credentials_dict(value: Any) -> dict[str, Any]:
@@ -71,26 +59,12 @@ def _raw_payload(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_codex_tokens(item: dict[str, Any]) -> dict[str, str]:
-    raw = _raw_payload(item)
-    credentials = _credentials_dict(raw.get("credentials"))
-    merged = {**raw, **credentials}
-    access_token = str(item.get("primary_token") or merged.get("access_token") or merged.get("accessToken") or "")
-    refresh_token = str(item.get("refresh_token") or merged.get("refresh_token") or merged.get("refreshToken") or "")
-    id_token = str(merged.get("id_token") or merged.get("idToken") or "")
-    account_id = str(merged.get("account_id") or merged.get("chatgpt_account_id") or "")
-    if not account_id:
-        for token in (access_token, id_token):
-            payload = _decode_jwt_payload(token)
-            auth = payload.get("https://api.openai.com/auth", {})
-            if isinstance(auth, dict):
-                account_id = str(auth.get("chatgpt_account_id") or auth.get("account_id") or "")
-                if account_id:
-                    break
+    oauth = extract_oauth_fields(item)
     return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "id_token": id_token,
-        "account_id": account_id,
+        "access_token": oauth["access_token"],
+        "refresh_token": oauth["refresh_token"],
+        "id_token": oauth["id_token"],
+        "account_id": oauth["account_id"],
     }
 
 
@@ -154,6 +128,13 @@ def _write_codex_home(item: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
 
 async def run_codex_activation(item: dict[str, Any]) -> CodexResult:
     settings = get_settings()
+    eligible, eligibility_reason = activation_eligibility(item)
+    if not eligible:
+        return CodexResult(
+            ok=False,
+            reply="",
+            error=f"库存不可正式激活: {eligibility_reason}",
+        )
     prompt = get_setting("codex_prompt", "你好") or "你好"
     command = get_setting("codex_command", settings.codex_command) or settings.codex_command
     if settings.dry_run:

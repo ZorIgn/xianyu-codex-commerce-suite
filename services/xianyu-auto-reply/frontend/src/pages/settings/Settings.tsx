@@ -577,20 +577,6 @@ export function Settings() {
                   <span className="switch-slider"></span>
                 </label>
               </div>
-              <div className="flex items-center justify-between py-3">
-                <div>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">显示默认登录信息</p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">登录页面显示默认账号密码提示</p>
-                </div>
-                <label className="switch-ios">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(settings?.show_default_login_info ?? false)}
-                    onChange={(e) => setSettings(s => s ? { ...s, show_default_login_info: e.target.checked } : null)}
-                  />
-                  <span className="switch-slider"></span>
-                </label>
-              </div>
               <div className="flex items-center justify-between py-3 border-t border-slate-100 dark:border-slate-700">
                 <div>
                   <p className="font-medium text-slate-900 dark:text-slate-100">登录滑动验证码</p>

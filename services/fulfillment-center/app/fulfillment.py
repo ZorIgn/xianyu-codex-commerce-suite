@@ -10,6 +10,7 @@ from .db import connect
 from .delivery_queue import enqueue_delivery_job
 from .idempotency import remember, seen
 from .inventory import (
+    activation_eligibility,
     get_inventory_item,
     render_delivery_text,
     reserve_many,
@@ -377,6 +378,12 @@ async def _ensure_activation_item(order_id: str, inventory_id: int) -> dict[str,
 
 async def activate_inventory_item(order_id: str, inventory_id: int) -> dict[str, Any]:
     requested_order_id = (order_id or "").strip() or f"manual-activate-{inventory_id}"
+    item = get_inventory_item(inventory_id)
+    if not item:
+        raise RuntimeError(f"库存不存在: {inventory_id}")
+    eligible, reason = activation_eligibility(item)
+    if not eligible:
+        raise RuntimeError(f"库存不可正式激活: {reason}")
     item = await _ensure_activation_item(requested_order_id, inventory_id)
     actual_order_id = str(item.get("reserved_order_id") or requested_order_id)
     fulfillment = get_fulfillment(actual_order_id) or {}

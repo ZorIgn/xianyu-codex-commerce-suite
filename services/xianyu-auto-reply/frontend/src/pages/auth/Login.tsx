@@ -5,7 +5,7 @@ import { MessageSquare, User, Lock, Mail, KeyRound, Eye, EyeOff } from 'lucide-r
 import { AuthNavbar } from '@/components/common/AuthNavbar'
 import { SafeHtml } from '@/components/common/SafeHtml'
 import { getDefaultAuthFooterAdSettings, getDefaultLoginBrandingSettings } from '@/api/settings'
-import { login, verifyToken, getRegistrationStatus, getLoginInfoStatus, generateCaptcha, verifyCaptcha, sendVerificationCode, getLoginCaptchaStatus, getLoginBrandingSettings, getAuthFooterAdSettings } from '@/api/auth'
+import { login, verifyToken, getRegistrationStatus, generateCaptcha, verifyCaptcha, sendVerificationCode, getLoginCaptchaStatus, getLoginBrandingSettings, getAuthFooterAdSettings, getInitialPasswordSetupStatus, setInitialAdminPassword } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/utils/cn'
@@ -13,6 +13,7 @@ import { ButtonLoading } from '@/components/common/Loading'
 import { GeetestCaptcha, type GeetestResult } from '@/components/common/GeetestCaptcha'
 
 type LoginType = 'username' | 'email-password' | 'email-code'
+type PasswordSetupMode = 'initial' | null
 
 export function Login() {
   const navigate = useNavigate()
@@ -23,7 +24,11 @@ export function Login() {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [registrationEnabled, setRegistrationEnabled] = useState(true)
-  const [showDefaultLogin, setShowDefaultLogin] = useState(true)
+  const [passwordSetupMode, setPasswordSetupMode] = useState<PasswordSetupMode>(null)
+  const [localResetRequired, setLocalResetRequired] = useState(false)
+  const [setupUsername, setSetupUsername] = useState('admin')
+  const [setupPassword, setSetupPassword] = useState('')
+  const [setupPasswordConfirmation, setSetupPasswordConfirmation] = useState('')
   const [loginCaptchaEnabled, setLoginCaptchaEnabled] = useState<boolean | null>(null)
   const [loginBranding, setLoginBranding] = useState(() => getDefaultLoginBrandingSettings())
   const [authFooterAd, setAuthFooterAd] = useState(() => getDefaultAuthFooterAdSettings())
@@ -81,8 +86,13 @@ export function Login() {
       .then((result) => setRegistrationEnabled(result.enabled))
       .catch(() => {})
 
-    getLoginInfoStatus()
-      .then((result) => setShowDefaultLogin(result.enabled))
+    getInitialPasswordSetupStatus()
+      .then((result) => {
+        if (result.success && result.data?.requires_password_setup) {
+          setSetupUsername(result.data.username || 'admin')
+          setPasswordSetupMode('initial')
+        }
+      })
       .catch(() => {})
 
     getLoginCaptchaStatus()
@@ -196,6 +206,7 @@ export function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    setLocalResetRequired(false)
 
     try {
       let loginData: any = {}
@@ -259,6 +270,14 @@ export function Login() {
         addToast({ type: 'success', message: '登录成功' })
         navigate('/dashboard')
       } else {
+        if (result.requires_password_setup) {
+          setLocalResetRequired(false)
+          setSetupUsername(result.username || username || 'admin')
+          setPasswordSetupMode('initial')
+        } else if (result.requires_local_reset) {
+          setLocalResetRequired(true)
+          setPasswordSetupMode(null)
+        }
         addToast({ type: 'error', message: result.message || '登录失败' })
         // 登录失败，重置滑动验证
         resetGeetest()
@@ -272,10 +291,44 @@ export function Login() {
     }
   }
 
-  const fillDefaultCredentials = () => {
-    setLoginType('username')
-    setUsername('admin')
-    setPassword('admin123')
+  const handlePasswordSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!setupUsername.trim()) {
+      addToast({ type: 'error', message: '请输入管理员用户名' })
+      return
+    }
+    if (setupPassword.length < 6) {
+      addToast({ type: 'error', message: '密码长度不能少于6位' })
+      return
+    }
+    if (setupPassword !== setupPasswordConfirmation) {
+      addToast({ type: 'error', message: '两次输入的密码不一致' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const result = await setInitialAdminPassword({
+        username: setupUsername.trim(),
+        new_password: setupPassword,
+      })
+
+      if (result.success) {
+        setLoginType('username')
+        setUsername(setupUsername.trim())
+        setPassword(setupPassword)
+        setPasswordSetupMode(null)
+        setSetupPassword('')
+        setSetupPasswordConfirmation('')
+        addToast({ type: 'success', message: result.message || '密码已更新，请使用新密码登录' })
+      } else {
+        addToast({ type: 'error', message: result.message || '密码更新失败' })
+      }
+    } catch {
+      addToast({ type: 'error', message: '密码更新失败，请确认当前浏览器运行在部署机器本机' })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -353,6 +406,84 @@ export function Login() {
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">欢迎回来，请登录您的账号</p>
             </div>
 
+            {passwordSetupMode ? (
+              <form onSubmit={handlePasswordSetupSubmit} className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                    首次设置管理员密码
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                    这是新部署的管理员账号，请先设置密码。此操作仅允许在部署机器本机完成。
+                  </p>
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">管理员用户名</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={setupUsername}
+                      onChange={(e) => setSetupUsername(e.target.value)}
+                      placeholder="请输入管理员用户名"
+                      className="input-ios pl-9"
+                      autoComplete="username"
+                    />
+                  </div>
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">新密码</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={setupPassword}
+                      onChange={(e) => setSetupPassword(e.target.value)}
+                      placeholder="请输入新密码"
+                      className="input-ios pl-9 pr-9"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">确认新密码</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={setupPasswordConfirmation}
+                      onChange={(e) => setSetupPasswordConfirmation(e.target.value)}
+                      placeholder="请再次输入新密码"
+                      className="input-ios pl-9"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={loading} className="w-full btn-ios-primary">
+                  {loading ? <ButtonLoading /> : '设置密码'}
+                </button>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setPasswordSetupMode(null)}
+                  className="w-full btn-ios-secondary"
+                >
+                  返回登录
+                </button>
+              </form>
+            ) : (
+              <>
             {/* Login type tabs */}
             <div className="flex border-b border-slate-200 dark:border-slate-700 mb-4 sm:mb-6 overflow-x-auto scrollbar-hide">
               {[
@@ -549,6 +680,20 @@ export function Login() {
                 {loading ? <ButtonLoading /> : '登 录'}
               </button>
             </form>
+              </>
+            )}
+
+            {localResetRequired && !passwordSetupMode && (
+              <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                <p className="font-medium">管理员账号暂时无法登录</p>
+                <p className="mt-1">
+                  请在部署机器运行仓库根目录的本地 reset 脚本，交互输入新密码并解除锁定；完成后回到此页登录。
+                </p>
+                <code className="mt-2 block break-all rounded bg-amber-100 px-2 py-1 text-xs dark:bg-amber-900/40">
+                  reset-admin-password.bat
+                </code>
+              </div>
+            )}
 
             {/* Forgot password + Register links */}
             <div className="flex items-center justify-between mt-6 text-sm">
@@ -562,24 +707,6 @@ export function Login() {
               )}
             </div>
 
-            {/* Default credentials */}
-            {showDefaultLogin && (
-              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700">
-                <button
-                  type="button"
-                  onClick={fillDefaultCredentials}
-                  className="w-full flex items-center justify-between p-3 rounded-md 
-                             bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 
-                             transition-colors text-sm"
-                >
-                  <div className="text-left">
-                    <p className="text-slate-500 dark:text-slate-400">演示账号</p>
-                    <p className="text-slate-900 dark:text-white font-medium">admin / admin123</p>
-                  </div>
-                  <span className="text-blue-600 dark:text-blue-400">一键填充 →</span>
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Footer */}

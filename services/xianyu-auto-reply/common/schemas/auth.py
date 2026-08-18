@@ -54,6 +54,8 @@ class LoginResponse(BaseModel):
     username: Optional[str] = None
     is_admin: Optional[bool] = None
     account_limit: Optional[int] = None
+    requires_password_setup: bool = False
+    requires_local_reset: bool = False
 
 
 class VerifyResponse(BaseModel):
@@ -62,4 +64,3 @@ class VerifyResponse(BaseModel):
     username: Optional[str] = None
     is_admin: Optional[bool] = None
     account_limit: Optional[int] = None
-
