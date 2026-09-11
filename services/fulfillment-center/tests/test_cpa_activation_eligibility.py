@@ -217,7 +217,7 @@ class CpaActivationEligibilityTest(unittest.TestCase):
         self.assertEqual(result["stage"], "ws_ineligible")
         self.assertIn("missing_account_id", result["error"])
 
-    def test_expired_and_revoked_claims_are_not_formally_eligible(self) -> None:
+    def test_expired_token_can_activate_but_cannot_ship(self) -> None:
         from app.inventory import import_cpa
 
         expired = import_cpa(
@@ -231,8 +231,46 @@ class CpaActivationEligibilityTest(unittest.TestCase):
                 )
             }
         )
-        self.assertFalse(expired["details"][0]["activation_eligible"])
-        self.assertEqual(expired["details"][0]["activation_eligible_reason"], "token_expired")
+        self.assertTrue(expired["details"][0]["activation_eligible"])
+        self.assertEqual(expired["details"][0]["activation_eligible_reason"], "ok")
+        self.assertFalse(expired["details"][0]["eligible"])
+        self.assertEqual(expired["details"][0]["eligible_reason"], "token_expired")
+
+    def test_expired_id_token_and_stored_markers_allow_all_activation_providers(self) -> None:
+        from app.inventory import activation_eligibility, desktop_oauth_status, normalize_account
+
+        now = int(time.time())
+        item = normalize_account(
+            {
+                "access_token": _jwt(
+                    {"account_id": "id-expired-account", "email": "id-expired@example.com", "exp": now + 86400}
+                ),
+                "id_token": _jwt({"exp": now - 60}),
+                "refresh_token": "test-refresh-token",
+            }
+        )
+        self.assertEqual(item["validity_status"], "expired")
+        item["lifecycle_status"] = "expired"
+        item["display_status"] = "expired"
+        os.environ["DRY_RUN"] = "false"
+        for provider in ("ws", "cli", "desktop"):
+            with self.subTest(provider=provider):
+                os.environ["ACTIVATION_PROVIDER"] = provider
+                self.assertEqual(activation_eligibility(item), (True, "ok"))
+        self.assertTrue(desktop_oauth_status(item)["ready"])
+        self.assertEqual(desktop_oauth_status(item)["missing"], [])
+
+        self.assertEqual(
+            activation_eligibility({**item, "token_revoked": True}),
+            (False, "token_revoked"),
+        )
+        self.assertEqual(
+            activation_eligibility({**item, "validity_status": "invalid"}),
+            (False, "invalid_validity"),
+        )
+
+    def test_revoked_invalid_and_used_claims_are_not_formally_eligible(self) -> None:
+        from app.inventory import import_cpa
 
         revoked = import_cpa(
             {

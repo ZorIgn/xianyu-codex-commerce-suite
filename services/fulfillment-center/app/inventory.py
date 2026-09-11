@@ -591,9 +591,7 @@ def desktop_oauth_status(row: dict[str, Any]) -> dict[str, Any]:
         "account_id": oauth["account_id"],
     }
     missing = [name for name, value in fields.items() if not value]
-    if oauth["expiry_state"] == "expired":
-        missing.append("expired")
-    elif oauth["expiry_state"] == "invalid":
+    if oauth["expiry_state"] == "invalid":
         missing.append("invalid_expiry")
     if oauth["token_revoked"]:
         missing.append("revoked")
@@ -641,21 +639,13 @@ def _hydrate_inventory_item(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def activation_eligibility(row: dict[str, Any]) -> tuple[bool, str]:
-    """Check formal activation prerequisites without requiring status=available."""
+    """Check activation prerequisites; the provider determines token expiration."""
     settings = get_settings()
     item = _hydrate_inventory_item(row)
     oauth = extract_oauth_fields(item)
     validity = _text(item.get("validity_status")).lower()
     lifecycle = _text(item.get("lifecycle_status")).lower()
     display = _text(item.get("display_status")).lower()
-    if (
-        oauth["expiry_state"] == "expired"
-        or oauth["expired_claim"]
-        or oauth["claim_status"] == "expired"
-        or validity == "expired"
-        or lifecycle == "expired"
-    ):
-        return False, "token_expired"
     if oauth["expiry_state"] == "invalid":
         return False, "invalid_token_expiry"
     if (
@@ -667,11 +657,11 @@ def activation_eligibility(row: dict[str, Any]) -> tuple[bool, str]:
         return False, "token_revoked"
     if validity in {"invalid", "disabled"}:
         return False, "invalid_validity"
-    if lifecycle in BAD_LIFECYCLE or oauth["claim_status"] in {"used", "consumed"}:
+    if lifecycle in BAD_LIFECYCLE - {"expired"} or oauth["claim_status"] in {"used", "consumed"}:
         return False, "bad_lifecycle"
     if oauth["claim_status"] in {"invalid", "disabled"}:
         return False, "invalid_validity"
-    if display in BAD_DISPLAY:
+    if display in BAD_DISPLAY - {"expired"}:
         return False, "bad_display"
     if _as_int(item.get("reset_count")) > settings.max_reset_count:
         return False, "reset_count_exceeded"
@@ -710,6 +700,18 @@ def activation_eligibility(row: dict[str, Any]) -> tuple[bool, str]:
 def is_eligible(row: dict[str, Any]) -> tuple[bool, str]:
     if _text(row.get("status")) != "available":
         return False, "not_available"
+    item = _hydrate_inventory_item(row)
+    oauth = extract_oauth_fields(item)
+    if (
+        oauth["expiry_state"] == "expired"
+        or oauth["expired_claim"]
+        or oauth["claim_status"] == "expired"
+        or _text(item.get("validity_status")).lower() == "expired"
+        or _text(item.get("lifecycle_status")).lower() == "expired"
+    ):
+        return False, "token_expired"
+    if _text(item.get("display_status")).lower() == "expired":
+        return False, "bad_display"
     return activation_eligibility(row)
 
 
